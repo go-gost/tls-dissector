@@ -19,6 +19,7 @@ const (
 	ExtEncryptThenMac       uint16 = 0x16
 	ExtExtendedMasterSecret uint16 = 0x17
 	ExtSessionTicket        uint16 = 0x23
+	ExtRenegotiationInfo    uint16 = 0xff01
 )
 
 var (
@@ -48,6 +49,8 @@ func NewExtension(t uint16, data []byte) (ext Extension, err error) {
 		ext = new(ExtendedMasterSecretExtension)
 	case ExtSessionTicket:
 		ext = new(SessionTicketExtension)
+	case ExtRenegotiationInfo:
+		ext = new(RenegotiationInfoExtension)
 	default:
 		ext = &unknownExtension{
 			types: t,
@@ -288,5 +291,35 @@ func (ext *ExtendedMasterSecretExtension) Encode() ([]byte, error) {
 func (ext *ExtendedMasterSecretExtension) Decode(b []byte) error {
 	ext.Data = make([]byte, len(b))
 	copy(ext.Data, b)
+	return nil
+}
+
+type RenegotiationInfoExtension struct {
+	Data []byte
+}
+
+func (ext *RenegotiationInfoExtension) Type() uint16 {
+	return ExtRenegotiationInfo
+}
+
+func (ext *RenegotiationInfoExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	buf.WriteByte(uint8(len(ext.Data)))
+	buf.Write(ext.Data)
+	return buf.Bytes(), nil
+}
+
+func (ext *RenegotiationInfoExtension) Decode(b []byte) error {
+	if len(b) < 1 {
+		return ErrShortBuffer
+	}
+
+	n := int(b[0])
+	if len(b[1:]) < n {
+		return ErrShortBuffer
+	}
+	ext.Data = make([]byte, n)
+	copy(ext.Data, b[1:])
+
 	return nil
 }
