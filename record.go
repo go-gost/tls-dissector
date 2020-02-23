@@ -11,8 +11,12 @@ const (
 	RecordHeaderLen = 5
 )
 
+// record content type
 const (
-	Handshake = 0x16
+	ChangeCipherSpec = 0x14
+	EncryptedAlert   = 0x15
+	Handshake        = 0x16
+	AppData          = 0x17
 )
 
 var (

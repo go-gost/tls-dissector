@@ -3,65 +3,108 @@ package dissector
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 )
 
 const (
-	ExtServerName uint16 = 0x0000
+	extensionHeaderLen = 4
+)
+
+const (
+	ExtServerName           uint16 = 0x00
+	ExtSupportedGroups      uint16 = 0x0a
+	ExtECPointFormats       uint16 = 0x0b
+	ExtSignatureAlgorithms  uint16 = 0x0d
+	ExtEncryptThenMac       uint16 = 0x16
+	ExtExtendedMasterSecret uint16 = 0x17
+	ExtSessionTicket        uint16 = 0x23
+)
+
+var (
+	ErrShortBuffer  = errors.New("short buffer")
+	ErrTypeMismatch = errors.New("type mismatch")
 )
 
 type Extension interface {
 	Type() uint16
-	Bytes() []byte
+	Encode() ([]byte, error)
+	Decode([]byte) error
 }
 
-func ReadExtension(r io.Reader) (ext Extension, err error) {
-	b := make([]byte, 4)
-	if _, err = io.ReadFull(r, b); err != nil {
-		return
+func NewExtension(t uint16, data []byte) (ext Extension, err error) {
+	switch t {
+	case ExtServerName:
+		ext = new(ServerNameExtension)
+	case ExtSupportedGroups:
+		ext = new(SupportedGroupsExtension)
+	case ExtECPointFormats:
+		ext = new(ECPointFormatsExtension)
+	case ExtSignatureAlgorithms:
+		ext = new(SignatureAlgorithmsExtension)
+	case ExtEncryptThenMac:
+		ext = new(EncryptThenMacExtension)
+	case ExtExtendedMasterSecret:
+		ext = new(ExtendedMasterSecretExtension)
+	case ExtSessionTicket:
+		ext = new(SessionTicketExtension)
+	default:
+		ext = &unknownExtension{
+			types: t,
+		}
 	}
+	err = ext.Decode(data)
+	return
+}
+
+func ReadExtension(r io.Reader) (Extension, error) {
+	b := make([]byte, extensionHeaderLen)
+	if _, err := io.ReadFull(r, b); err != nil {
+		return nil, err
+	}
+	t := binary.BigEndian.Uint16(b[:2])
 	bb := make([]byte, int(binary.BigEndian.Uint16(b[2:4])))
-	if _, err = io.ReadFull(r, bb); err != nil {
+	if _, err := io.ReadFull(r, bb); err != nil {
 		return nil, err
 	}
 
-	t := binary.BigEndian.Uint16(b[:2])
-	switch t {
-	case ExtServerName:
-		ext = &ServerNameExtension{
-			NameType: bb[2],
-			Name:     string(bb[5:]),
-		}
+	return NewExtension(t, bb)
+}
 
-	default:
-		ext = &unknownExtension{
-			raw: append(b, bb...),
-		}
+func readExtensions(b []byte) (exts []Extension, err error) {
+	if len(b) == 0 {
+		return
 	}
 
+	br := bytes.NewReader(b)
+	for br.Len() > 0 {
+		var ext Extension
+		ext, err = ReadExtension(br)
+		if err != nil {
+			return
+		}
+		exts = append(exts, ext)
+	}
 	return
 }
 
 type unknownExtension struct {
-	raw []byte
-}
-
-func NewExtension(t uint16, data []byte) Extension {
-	ext := &unknownExtension{
-		raw: make([]byte, 2+2+len(data)),
-	}
-	binary.BigEndian.PutUint16(ext.raw[:2], t)
-	binary.BigEndian.PutUint16(ext.raw[2:4], uint16(len(data)))
-	copy(ext.raw[4:], data)
-	return ext
+	types uint16
+	raw   []byte
 }
 
 func (ext *unknownExtension) Type() uint16 {
-	return binary.BigEndian.Uint16(ext.raw)
+	return ext.types
 }
 
-func (ext *unknownExtension) Bytes() []byte {
-	return ext.raw
+func (ext *unknownExtension) Encode() ([]byte, error) {
+	return ext.raw, nil
+}
+
+func (ext *unknownExtension) Decode(b []byte) error {
+	ext.raw = make([]byte, len(b))
+	copy(ext.raw, b)
+	return nil
 }
 
 type ServerNameExtension struct {
@@ -73,13 +116,261 @@ func (ext *ServerNameExtension) Type() uint16 {
 	return ExtServerName
 }
 
-func (ext *ServerNameExtension) Bytes() []byte {
+func (ext *ServerNameExtension) Encode() ([]byte, error) {
 	buf := &bytes.Buffer{}
-	binary.Write(buf, binary.BigEndian, ExtServerName)
+	binary.Write(buf, binary.BigEndian, ext.Type())
 	binary.Write(buf, binary.BigEndian, uint16(2+1+2+len(ext.Name)))
 	binary.Write(buf, binary.BigEndian, uint16(1+2+len(ext.Name)))
 	buf.WriteByte(ext.NameType)
 	binary.Write(buf, binary.BigEndian, uint16(len(ext.Name)))
 	buf.WriteString(ext.Name)
-	return buf.Bytes()
+	return buf.Bytes(), nil
+}
+
+func (ext *ServerNameExtension) Decode(b []byte) error {
+	if len(b) < extensionHeaderLen+5 {
+		return ErrShortBuffer
+	}
+
+	t := binary.BigEndian.Uint16(b)
+	if t != ExtServerName {
+		return ErrTypeMismatch
+	}
+
+	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
+		return ErrShortBuffer
+	}
+	ext.NameType = b[6]
+	n := int(binary.BigEndian.Uint16(b[7:]))
+	if len(b[9:]) < n {
+		return ErrShortBuffer
+	}
+	ext.Name = string(b[9 : 9+n])
+	return nil
+}
+
+type SessionTicketExtension struct {
+	Data []byte
+}
+
+func (ext *SessionTicketExtension) Type() uint16 {
+	return ExtSessionTicket
+}
+
+func (ext *SessionTicketExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.BigEndian, ext.Type())
+	binary.Write(buf, binary.BigEndian, uint16(len(ext.Data)))
+	buf.Write(ext.Data)
+	return buf.Bytes(), nil
+}
+
+func (ext *SessionTicketExtension) Decode(b []byte) error {
+	if len(b) < extensionHeaderLen {
+		return ErrShortBuffer
+	}
+
+	t := binary.BigEndian.Uint16(b)
+	if t != ExtSessionTicket {
+		return ErrTypeMismatch
+	}
+
+	n := int(binary.BigEndian.Uint16(b[2:]))
+	if len(b[4:]) < n {
+		return ErrShortBuffer
+	}
+	ext.Data = make([]byte, n)
+	copy(ext.Data, b[4:])
+	return nil
+}
+
+type ECPointFormatsExtension struct {
+	Formats []uint8
+}
+
+func (ext *ECPointFormatsExtension) Type() uint16 {
+	return ExtECPointFormats
+}
+
+func (ext *ECPointFormatsExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.BigEndian, ext.Type())
+	binary.Write(buf, binary.BigEndian, uint16(len(ext.Formats)+1))
+	buf.WriteByte(uint8(len(ext.Formats)))
+	buf.Write(ext.Formats)
+	return buf.Bytes(), nil
+}
+
+func (ext *ECPointFormatsExtension) Decode(b []byte) error {
+	if len(b) < extensionHeaderLen+1 {
+		return ErrShortBuffer
+	}
+
+	t := binary.BigEndian.Uint16(b)
+	if t != ExtECPointFormats {
+		return ErrTypeMismatch
+	}
+
+	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
+		return ErrShortBuffer
+	}
+
+	n := int(b[4])
+	if len(b[5:]) < n {
+		return ErrShortBuffer
+	}
+
+	ext.Formats = make([]byte, n)
+	copy(ext.Formats, b[5:])
+	return nil
+}
+
+type SupportedGroupsExtension struct {
+	Groups []uint16
+}
+
+func (ext *SupportedGroupsExtension) Type() uint16 {
+	return ExtSupportedGroups
+}
+
+func (ext *SupportedGroupsExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.BigEndian, ext.Type())
+	binary.Write(buf, binary.BigEndian, uint16(len(ext.Groups)*2+2))
+	binary.Write(buf, binary.BigEndian, uint16(len(ext.Groups)*2))
+	for _, group := range ext.Groups {
+		binary.Write(buf, binary.BigEndian, group)
+	}
+	return buf.Bytes(), nil
+}
+
+func (ext *SupportedGroupsExtension) Decode(b []byte) error {
+	if len(b) < extensionHeaderLen+2 {
+		return ErrShortBuffer
+	}
+
+	t := binary.BigEndian.Uint16(b)
+	if t != ExtSupportedGroups {
+		return ErrTypeMismatch
+	}
+
+	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
+		return ErrShortBuffer
+	}
+
+	n := int(binary.BigEndian.Uint16(b[4:]))
+	if len(b[6:]) < n {
+		return ErrShortBuffer
+	}
+
+	ext.Groups = make([]uint16, n/2)
+	for i := 0; i < n; i += 2 {
+		ext.Groups = append(ext.Groups, binary.BigEndian.Uint16(b[6+i:]))
+	}
+	return nil
+}
+
+type SignatureAlgorithmsExtension struct {
+	Algorithms []uint16
+}
+
+func (ext *SignatureAlgorithmsExtension) Type() uint16 {
+	return ExtSignatureAlgorithms
+}
+
+func (ext *SignatureAlgorithmsExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.BigEndian, ext.Type())
+	binary.Write(buf, binary.BigEndian, uint16(len(ext.Algorithms)*2+2))
+	binary.Write(buf, binary.BigEndian, uint16(len(ext.Algorithms)*2))
+	for _, alg := range ext.Algorithms {
+		binary.Write(buf, binary.BigEndian, alg)
+	}
+	return buf.Bytes(), nil
+}
+
+func (ext *SignatureAlgorithmsExtension) Decode(b []byte) error {
+	if len(b) < extensionHeaderLen+2 {
+		return ErrShortBuffer
+	}
+
+	t := binary.BigEndian.Uint16(b)
+	if t != ExtSignatureAlgorithms {
+		return ErrTypeMismatch
+	}
+
+	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
+		return ErrShortBuffer
+	}
+
+	n := int(binary.BigEndian.Uint16(b[4:]))
+	if len(b[6:]) < n {
+		return ErrShortBuffer
+	}
+
+	ext.Algorithms = make([]uint16, n/2)
+	for i := 0; i < n; i += 2 {
+		ext.Algorithms = append(ext.Algorithms, binary.BigEndian.Uint16(b[6+i:]))
+	}
+	return nil
+}
+
+type EncryptThenMacExtension struct {
+}
+
+func (ext *EncryptThenMacExtension) Type() uint16 {
+	return ExtEncryptThenMac
+}
+
+func (ext *EncryptThenMacExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.BigEndian, ext.Type())
+	binary.Write(buf, binary.BigEndian, uint16(0))
+	return buf.Bytes(), nil
+}
+
+func (ext *EncryptThenMacExtension) Decode(b []byte) error {
+	if len(b) < extensionHeaderLen {
+		return ErrShortBuffer
+	}
+
+	t := binary.BigEndian.Uint16(b)
+	if t != ExtEncryptThenMac {
+		return ErrTypeMismatch
+	}
+
+	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
+		return ErrShortBuffer
+	}
+	return nil
+}
+
+type ExtendedMasterSecretExtension struct {
+}
+
+func (ext *ExtendedMasterSecretExtension) Type() uint16 {
+	return ExtExtendedMasterSecret
+}
+
+func (ext *ExtendedMasterSecretExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.BigEndian, ext.Type())
+	binary.Write(buf, binary.BigEndian, uint16(0))
+	return buf.Bytes(), nil
+}
+
+func (ext *ExtendedMasterSecretExtension) Decode(b []byte) error {
+	if len(b) < extensionHeaderLen {
+		return ErrShortBuffer
+	}
+
+	t := binary.BigEndian.Uint16(b)
+	if t != ExtExtendedMasterSecret {
+		return ErrTypeMismatch
+	}
+
+	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
+		return ErrShortBuffer
+	}
+	return nil
 }
