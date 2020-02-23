@@ -118,8 +118,6 @@ func (ext *ServerNameExtension) Type() uint16 {
 
 func (ext *ServerNameExtension) Encode() ([]byte, error) {
 	buf := &bytes.Buffer{}
-	binary.Write(buf, binary.BigEndian, ext.Type())
-	binary.Write(buf, binary.BigEndian, uint16(2+1+2+len(ext.Name)))
 	binary.Write(buf, binary.BigEndian, uint16(1+2+len(ext.Name)))
 	buf.WriteByte(ext.NameType)
 	binary.Write(buf, binary.BigEndian, uint16(len(ext.Name)))
@@ -128,24 +126,16 @@ func (ext *ServerNameExtension) Encode() ([]byte, error) {
 }
 
 func (ext *ServerNameExtension) Decode(b []byte) error {
-	if len(b) < extensionHeaderLen+5 {
+	if len(b) < 3 {
 		return ErrShortBuffer
 	}
 
-	t := binary.BigEndian.Uint16(b)
-	if t != ExtServerName {
-		return ErrTypeMismatch
-	}
-
-	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
+	ext.NameType = b[0]
+	n := int(binary.BigEndian.Uint16(b[1:]))
+	if len(b[3:]) < n {
 		return ErrShortBuffer
 	}
-	ext.NameType = b[6]
-	n := int(binary.BigEndian.Uint16(b[7:]))
-	if len(b[9:]) < n {
-		return ErrShortBuffer
-	}
-	ext.Name = string(b[9 : 9+n])
+	ext.Name = string(b[3 : 3+n])
 	return nil
 }
 
@@ -158,29 +148,12 @@ func (ext *SessionTicketExtension) Type() uint16 {
 }
 
 func (ext *SessionTicketExtension) Encode() ([]byte, error) {
-	buf := &bytes.Buffer{}
-	binary.Write(buf, binary.BigEndian, ext.Type())
-	binary.Write(buf, binary.BigEndian, uint16(len(ext.Data)))
-	buf.Write(ext.Data)
-	return buf.Bytes(), nil
+	return ext.Data, nil
 }
 
 func (ext *SessionTicketExtension) Decode(b []byte) error {
-	if len(b) < extensionHeaderLen {
-		return ErrShortBuffer
-	}
-
-	t := binary.BigEndian.Uint16(b)
-	if t != ExtSessionTicket {
-		return ErrTypeMismatch
-	}
-
-	n := int(binary.BigEndian.Uint16(b[2:]))
-	if len(b[4:]) < n {
-		return ErrShortBuffer
-	}
-	ext.Data = make([]byte, n)
-	copy(ext.Data, b[4:])
+	ext.Data = make([]byte, len(b))
+	copy(ext.Data, b)
 	return nil
 }
 
@@ -194,34 +167,23 @@ func (ext *ECPointFormatsExtension) Type() uint16 {
 
 func (ext *ECPointFormatsExtension) Encode() ([]byte, error) {
 	buf := &bytes.Buffer{}
-	binary.Write(buf, binary.BigEndian, ext.Type())
-	binary.Write(buf, binary.BigEndian, uint16(len(ext.Formats)+1))
 	buf.WriteByte(uint8(len(ext.Formats)))
 	buf.Write(ext.Formats)
 	return buf.Bytes(), nil
 }
 
 func (ext *ECPointFormatsExtension) Decode(b []byte) error {
-	if len(b) < extensionHeaderLen+1 {
+	if len(b) < 1 {
 		return ErrShortBuffer
 	}
 
-	t := binary.BigEndian.Uint16(b)
-	if t != ExtECPointFormats {
-		return ErrTypeMismatch
-	}
-
-	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
-		return ErrShortBuffer
-	}
-
-	n := int(b[4])
-	if len(b[5:]) < n {
+	n := int(b[0])
+	if len(b[1:]) < n {
 		return ErrShortBuffer
 	}
 
 	ext.Formats = make([]byte, n)
-	copy(ext.Formats, b[5:])
+	copy(ext.Formats, b[1:])
 	return nil
 }
 
@@ -235,8 +197,6 @@ func (ext *SupportedGroupsExtension) Type() uint16 {
 
 func (ext *SupportedGroupsExtension) Encode() ([]byte, error) {
 	buf := &bytes.Buffer{}
-	binary.Write(buf, binary.BigEndian, ext.Type())
-	binary.Write(buf, binary.BigEndian, uint16(len(ext.Groups)*2+2))
 	binary.Write(buf, binary.BigEndian, uint16(len(ext.Groups)*2))
 	for _, group := range ext.Groups {
 		binary.Write(buf, binary.BigEndian, group)
@@ -245,27 +205,18 @@ func (ext *SupportedGroupsExtension) Encode() ([]byte, error) {
 }
 
 func (ext *SupportedGroupsExtension) Decode(b []byte) error {
-	if len(b) < extensionHeaderLen+2 {
+	if len(b) < 2 {
 		return ErrShortBuffer
 	}
 
-	t := binary.BigEndian.Uint16(b)
-	if t != ExtSupportedGroups {
-		return ErrTypeMismatch
-	}
-
-	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
-		return ErrShortBuffer
-	}
-
-	n := int(binary.BigEndian.Uint16(b[4:]))
-	if len(b[6:]) < n {
+	n := int(binary.BigEndian.Uint16(b))
+	if len(b[2:]) < n {
 		return ErrShortBuffer
 	}
 
 	ext.Groups = make([]uint16, n/2)
 	for i := 0; i < n; i += 2 {
-		ext.Groups = append(ext.Groups, binary.BigEndian.Uint16(b[6+i:]))
+		ext.Groups = append(ext.Groups, binary.BigEndian.Uint16(b[2+i:]))
 	}
 	return nil
 }
@@ -280,8 +231,6 @@ func (ext *SignatureAlgorithmsExtension) Type() uint16 {
 
 func (ext *SignatureAlgorithmsExtension) Encode() ([]byte, error) {
 	buf := &bytes.Buffer{}
-	binary.Write(buf, binary.BigEndian, ext.Type())
-	binary.Write(buf, binary.BigEndian, uint16(len(ext.Algorithms)*2+2))
 	binary.Write(buf, binary.BigEndian, uint16(len(ext.Algorithms)*2))
 	for _, alg := range ext.Algorithms {
 		binary.Write(buf, binary.BigEndian, alg)
@@ -290,32 +239,24 @@ func (ext *SignatureAlgorithmsExtension) Encode() ([]byte, error) {
 }
 
 func (ext *SignatureAlgorithmsExtension) Decode(b []byte) error {
-	if len(b) < extensionHeaderLen+2 {
+	if len(b) < 2 {
 		return ErrShortBuffer
 	}
 
-	t := binary.BigEndian.Uint16(b)
-	if t != ExtSignatureAlgorithms {
-		return ErrTypeMismatch
-	}
-
-	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
-		return ErrShortBuffer
-	}
-
-	n := int(binary.BigEndian.Uint16(b[4:]))
-	if len(b[6:]) < n {
+	n := int(binary.BigEndian.Uint16(b))
+	if len(b[2:]) < n {
 		return ErrShortBuffer
 	}
 
 	ext.Algorithms = make([]uint16, n/2)
 	for i := 0; i < n; i += 2 {
-		ext.Algorithms = append(ext.Algorithms, binary.BigEndian.Uint16(b[6+i:]))
+		ext.Algorithms = append(ext.Algorithms, binary.BigEndian.Uint16(b[2+i:]))
 	}
 	return nil
 }
 
 type EncryptThenMacExtension struct {
+	Data []byte
 }
 
 func (ext *EncryptThenMacExtension) Type() uint16 {
@@ -323,29 +264,17 @@ func (ext *EncryptThenMacExtension) Type() uint16 {
 }
 
 func (ext *EncryptThenMacExtension) Encode() ([]byte, error) {
-	buf := &bytes.Buffer{}
-	binary.Write(buf, binary.BigEndian, ext.Type())
-	binary.Write(buf, binary.BigEndian, uint16(0))
-	return buf.Bytes(), nil
+	return ext.Data, nil
 }
 
 func (ext *EncryptThenMacExtension) Decode(b []byte) error {
-	if len(b) < extensionHeaderLen {
-		return ErrShortBuffer
-	}
-
-	t := binary.BigEndian.Uint16(b)
-	if t != ExtEncryptThenMac {
-		return ErrTypeMismatch
-	}
-
-	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
-		return ErrShortBuffer
-	}
+	ext.Data = make([]byte, len(b))
+	copy(ext.Data, b)
 	return nil
 }
 
 type ExtendedMasterSecretExtension struct {
+	Data []byte
 }
 
 func (ext *ExtendedMasterSecretExtension) Type() uint16 {
@@ -353,24 +282,11 @@ func (ext *ExtendedMasterSecretExtension) Type() uint16 {
 }
 
 func (ext *ExtendedMasterSecretExtension) Encode() ([]byte, error) {
-	buf := &bytes.Buffer{}
-	binary.Write(buf, binary.BigEndian, ext.Type())
-	binary.Write(buf, binary.BigEndian, uint16(0))
-	return buf.Bytes(), nil
+	return ext.Data, nil
 }
 
 func (ext *ExtendedMasterSecretExtension) Decode(b []byte) error {
-	if len(b) < extensionHeaderLen {
-		return ErrShortBuffer
-	}
-
-	t := binary.BigEndian.Uint16(b)
-	if t != ExtExtendedMasterSecret {
-		return ErrTypeMismatch
-	}
-
-	if len(b[4:]) < int(binary.BigEndian.Uint16(b[2:])) {
-		return ErrShortBuffer
-	}
+	ext.Data = make([]byte, len(b))
+	copy(ext.Data, b)
 	return nil
 }
