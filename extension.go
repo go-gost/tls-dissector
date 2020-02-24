@@ -217,7 +217,6 @@ func (ext *SupportedGroupsExtension) Decode(b []byte) error {
 		return ErrShortBuffer
 	}
 
-	ext.Groups = make([]uint16, n/2)
 	for i := 0; i < n; i += 2 {
 		ext.Groups = append(ext.Groups, binary.BigEndian.Uint16(b[2+i:]))
 	}
@@ -251,7 +250,6 @@ func (ext *SignatureAlgorithmsExtension) Decode(b []byte) error {
 		return ErrShortBuffer
 	}
 
-	ext.Algorithms = make([]uint16, n/2)
 	for i := 0; i < n; i += 2 {
 		ext.Algorithms = append(ext.Algorithms, binary.BigEndian.Uint16(b[2+i:]))
 	}
