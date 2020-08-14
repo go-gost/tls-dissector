@@ -212,7 +212,7 @@ func (ext *SupportedGroupsExtension) Decode(b []byte) error {
 		return ErrShortBuffer
 	}
 
-	n := int(binary.BigEndian.Uint16(b))
+	n := int(binary.BigEndian.Uint16(b)) / 2 * 2 //make it even
 	if len(b[2:]) < n {
 		return ErrShortBuffer
 	}
