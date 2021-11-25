@@ -1,3 +1,3 @@
-module github.com/ginuerzh/tls-dissector
+module github.com/go-gost/tls-dissector
 
-go 1.13
+go 1.17
