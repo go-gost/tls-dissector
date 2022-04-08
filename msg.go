@@ -72,7 +72,7 @@ func (m *ClientHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 		return
 	}
 	m.Version = Version(binary.BigEndian.Uint16(b[:2]))
-	if m.Version < tls.VersionTLS12 {
+	if m.Version < tls.VersionTLS10 || m.Version > tls.VersionTLS13 {
 		err = fmt.Errorf("bad version: only TLSv1.2 is supported")
 		return
 	}
