@@ -73,7 +73,7 @@ func (m *ClientHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 	}
 	m.Version = Version(binary.BigEndian.Uint16(b[:2]))
 	if m.Version < tls.VersionTLS10 || m.Version > tls.VersionTLS13 {
-		err = fmt.Errorf("bad version: only TLSv1.2 is supported")
+		err = fmt.Errorf("bad version %x", m.Version)
 		return
 	}
 
@@ -101,7 +101,7 @@ func (m *ClientHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 	}
 	pos += nn
 
-	nn, err = m.readExtensions(b[pos:])
+	_, err = m.readExtensions(b[pos:])
 	if err != nil {
 		return
 	}
@@ -287,8 +287,8 @@ func (m *ServerHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 		return
 	}
 	m.Version = Version(binary.BigEndian.Uint16(b[:2]))
-	if m.Version < tls.VersionTLS12 {
-		err = fmt.Errorf("bad version: only TLSv1.2 is supported")
+	if m.Version < tls.VersionTLS10 || m.Version > tls.VersionTLS13 {
+		err = fmt.Errorf("bad version %x", m.Version)
 		return
 	}
 
@@ -310,7 +310,7 @@ func (m *ServerHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 	m.CompressionMethod = b[pos]
 	pos++
 
-	nn, err = m.readExtensions(b[pos:])
+	_, err = m.readExtensions(b[pos:])
 	if err != nil {
 		return
 	}
