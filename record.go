@@ -17,10 +17,12 @@ const (
 	EncryptedAlert   = 0x15
 	Handshake        = 0x16
 	AppData          = 0x17
+	Heartbeat        = 0x18
 )
 
 var (
 	ErrBadType = errors.New("bad type")
+	ErrAlert   = errors.New("alert")
 )
 
 type Version uint16

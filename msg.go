@@ -404,3 +404,119 @@ func (m *ServerHelloMsg) WriteTo(w io.Writer) (n int64, err error) {
 	n = int64(nn)
 	return
 }
+
+type AlertLevel uint8
+
+func (l AlertLevel) String() string {
+	switch l {
+	case 1:
+		return "warning"
+	case 2:
+		return "fatal"
+	}
+	return fmt.Sprintf("unknown level: %d", l)
+}
+
+type AlertDescription uint8
+
+func (d AlertDescription) String() string {
+	switch d {
+	case 0:
+		return "close notify"
+	case 10:
+		return "unexpected message"
+	case 20:
+		return "bad record mac"
+	case 21:
+		return "decryption failed RESERVED"
+	case 22:
+		return "record overflow"
+	case 30:
+		return "decompression failure"
+	case 40:
+		return "handshake failure"
+	case 41:
+		return "no certificate RESERVED"
+	case 42:
+		return "bad certificate"
+	case 43:
+		return "unsupported certificate"
+	case 44:
+		return "certificate revoked"
+	case 45:
+		return "certificate expired"
+	case 46:
+		return "certificate unknown"
+	case 47:
+		return "illegal parameter"
+	case 48:
+		return "unknown ca"
+	case 49:
+		return "access denied"
+	case 50:
+		return "decode error"
+	case 51:
+		return "decrypt error"
+	case 60:
+		return "export restriction RESERVED"
+	case 70:
+		return "protocol version"
+	case 71:
+		return "insufficient security"
+	case 80:
+		return "internal error"
+	case 86:
+		return "inappropriate fallback"
+	case 90:
+		return "user canceled"
+	case 100:
+		return "no renegotiation"
+	case 110:
+		return "unsupported extension"
+	case 111:
+		return "certificate unobtainable"
+	case 112:
+		return "unrecognized name"
+	case 113:
+		return "bad certificate status response"
+	case 114:
+		return "bad certificate hash value"
+	case 115:
+		return "unknown PSK identity"
+	case 116:
+		return "certificate required"
+	case 120:
+		return "no application protocol"
+	}
+	return fmt.Sprintf("unknown desc: %d", d)
+}
+
+type AlertMsg struct {
+	Level       AlertLevel
+	Description AlertDescription
+}
+
+func (m *AlertMsg) Encode() (data []byte, err error) {
+	buf := new(bytes.Buffer)
+
+	buf.WriteByte(byte(m.Level))
+	buf.WriteByte(byte(m.Description))
+
+	data = buf.Bytes()
+	return
+}
+
+func (m *AlertMsg) Decode(data []byte) (err error) {
+	if len(data) < 2 {
+		return fmt.Errorf("alert: %w", ErrShortBuffer)
+	}
+
+	m.Level = AlertLevel(data[0])
+	m.Description = AlertDescription(data[1])
+
+	return
+}
+
+func (m *AlertMsg) String() string {
+	return fmt.Sprintf("%s: %s", m.Level, m.Description)
+}

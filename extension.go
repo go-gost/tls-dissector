@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -138,13 +139,13 @@ func (ext *ServerNameExtension) Encode() ([]byte, error) {
 
 func (ext *ServerNameExtension) Decode(b []byte) error {
 	if len(b) < 5 {
-		return ErrShortBuffer
+		return fmt.Errorf("server_name: %w", ErrShortBuffer)
 	}
 
 	ext.NameType = b[2]
 	n := int(binary.BigEndian.Uint16(b[3:]))
 	if len(b[5:]) < n {
-		return ErrShortBuffer
+		return fmt.Errorf("server_name: %w", ErrShortBuffer)
 	}
 	ext.Name = string(b[5 : 5+n])
 	return nil
@@ -185,12 +186,12 @@ func (ext *ECPointFormatsExtension) Encode() ([]byte, error) {
 
 func (ext *ECPointFormatsExtension) Decode(b []byte) error {
 	if len(b) < 1 {
-		return ErrShortBuffer
+		return fmt.Errorf("ec_point_formats: %w", ErrShortBuffer)
 	}
 
 	n := int(b[0])
 	if len(b[1:]) < n {
-		return ErrShortBuffer
+		return fmt.Errorf("ec_point_formats: %w", ErrShortBuffer)
 	}
 
 	ext.Formats = make([]byte, n)
@@ -217,12 +218,12 @@ func (ext *SupportedGroupsExtension) Encode() ([]byte, error) {
 
 func (ext *SupportedGroupsExtension) Decode(b []byte) error {
 	if len(b) < 2 {
-		return ErrShortBuffer
+		return fmt.Errorf("supported_groups: %w", ErrShortBuffer)
 	}
 
 	n := int(binary.BigEndian.Uint16(b)) / 2 * 2 //make it even
 	if len(b[2:]) < n {
-		return ErrShortBuffer
+		return fmt.Errorf("supported_groups: %w", ErrShortBuffer)
 	}
 
 	for i := 0; i < n; i += 2 {
@@ -250,12 +251,12 @@ func (ext *SignatureAlgorithmsExtension) Encode() ([]byte, error) {
 
 func (ext *SignatureAlgorithmsExtension) Decode(b []byte) error {
 	if len(b) < 2 {
-		return ErrShortBuffer
+		return fmt.Errorf("signature_algorithms: %w", ErrShortBuffer)
 	}
 
 	n := int(binary.BigEndian.Uint16(b))
 	if len(b[2:]) < n {
-		return ErrShortBuffer
+		return fmt.Errorf("signature_algorithms: %w", ErrShortBuffer)
 	}
 
 	for i := 0; i < n; i += 2 {
@@ -317,12 +318,12 @@ func (ext *RenegotiationInfoExtension) Encode() ([]byte, error) {
 
 func (ext *RenegotiationInfoExtension) Decode(b []byte) error {
 	if len(b) < 1 {
-		return ErrShortBuffer
+		return fmt.Errorf("renegotiation_info: %w", ErrShortBuffer)
 	}
 
 	n := int(b[0])
 	if len(b[1:]) < n {
-		return ErrShortBuffer
+		return fmt.Errorf("renegotiation_info: %w", ErrShortBuffer)
 	}
 	ext.Data = make([]byte, n)
 	copy(ext.Data, b[1:])
@@ -357,20 +358,20 @@ func (ext *ALPNExtension) Encode() ([]byte, error) {
 
 func (ext *ALPNExtension) Decode(b []byte) error {
 	if len(b) < 2 {
-		return ErrShortBuffer
+		return fmt.Errorf("application_layer_protocol_negotiation: %w", ErrShortBuffer)
 	}
 
 	alpnLen := int(binary.BigEndian.Uint16(b[:2]))
 	b = b[2:]
 	if len(b) < alpnLen {
-		return ErrShortBuffer
+		return fmt.Errorf("application_layer_protocol_negotiation: %w", ErrShortBuffer)
 	}
 	b = b[:alpnLen]
 
 	for {
 		n := int(b[0])
 		if len(b[1:]) < n {
-			return ErrShortBuffer
+			return fmt.Errorf("application_layer_protocol_negotiation: %w", ErrShortBuffer)
 		}
 
 		if proto := string(b[1 : 1+n]); proto != "" {
@@ -426,19 +427,19 @@ func (ext *SupportedVersionsExtension) Encode() ([]byte, error) {
 
 func (ext *SupportedVersionsExtension) Decode(b []byte) error {
 	if len(b) < 2 {
-		return ErrShortBuffer
+		return fmt.Errorf("supported_versions: %w", ErrShortBuffer)
 	}
 
-	verLen := int(b[0])
-	if verLen == 3 {
-		ext.Versions = append(ext.Versions, binary.BigEndian.Uint16(b[:2]))
+	if len(b) == 2 {
+		ext.Versions = append(ext.Versions, binary.BigEndian.Uint16(b))
 		ext.Server = true
 		return nil
 	}
 
+	verLen := int(b[0])
 	b = b[1:]
 	if len(b) < verLen {
-		return ErrShortBuffer
+		return fmt.Errorf("supported_versions: %w", ErrShortBuffer)
 	}
 	b = b[:verLen]
 

@@ -2,6 +2,7 @@ package dissector
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 )
 
@@ -64,8 +65,17 @@ func ParseServerHello(r io.Reader) (*ServerHelloInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if record.Type != Handshake {
-		return nil, ErrBadType
+
+	switch record.Type {
+	case Handshake:
+	case EncryptedAlert:
+		msg := &AlertMsg{}
+		if err := msg.Decode(record.Opaque); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %s", ErrAlert, msg.String())
+	default:
+		return nil, fmt.Errorf("%w %d", ErrBadType, record.Type)
 	}
 
 	msg := &ServerHelloMsg{}
