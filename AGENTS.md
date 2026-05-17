@@ -115,10 +115,17 @@ Unknown extensions are preserved as `unknownExtension` (raw bytes passthrough).
 ## Testing
 
 ```sh
-cd tls-dissector && go test ./...
+cd tls-dissector && go test -v ./...
 ```
 
-There are currently no tests.
+Coverage: **87%** of statements (64 tests across 4 test files).
+
+| Test file | Focus |
+|-----------|-------|
+| `record_test.go` | `ReadRecord`, `WriteTo` round-trip, truncation |
+| `msg_test.go` | `ClientHelloMsg` / `ServerHelloMsg` round-trip + errors, `AlertMsg` |
+| `extension_test.go` | All 11 extensions round-trip + decode errors, `NewExtension`, `ReadExtension` |
+| `dissector_test.go` | `ParseClientHello` / `ParseServerHello` full end-to-end, bad records, alert path, version fix regression |
 
 ## Related modules
 
