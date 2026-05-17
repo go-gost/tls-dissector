@@ -112,16 +112,15 @@ func (m *ClientHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 
 func (m *ClientHelloMsg) readSession(b []byte) (n int, err error) {
 	if len(b) == 0 {
-		err = fmt.Errorf("bad length: data too short for session")
-		return
+		return 0, fmt.Errorf("bad length: data too short for session")
 	}
 
 	nlen := int(b[0])
 	n++
 	if len(b) < n+nlen {
-		err = fmt.Errorf("bad length: malformed data for session")
+		return 0, fmt.Errorf("bad length: malformed data for session")
 	}
-	if nlen > 0 && n+nlen <= len(b) {
+	if nlen > 0 {
 		m.SessionID = make([]byte, nlen)
 		copy(m.SessionID, b[n:n+nlen])
 		n += nlen
@@ -132,14 +131,13 @@ func (m *ClientHelloMsg) readSession(b []byte) (n int, err error) {
 
 func (m *ClientHelloMsg) readCipherSuites(b []byte) (n int, err error) {
 	if len(b) < 2 {
-		err = fmt.Errorf("bad length: data too short for cipher suites")
-		return
+		return 0, fmt.Errorf("bad length: data too short for cipher suites")
 	}
 
 	nlen := int(binary.BigEndian.Uint16(b[:2]))
 	n += 2
 	if len(b) < n+nlen {
-		err = fmt.Errorf("bad length: malformed data for cipher suites")
+		return 0, fmt.Errorf("bad length: malformed data for cipher suites")
 	}
 	for i := 0; i < nlen/2; i++ {
 		m.CipherSuites = append(m.CipherSuites, binary.BigEndian.Uint16(b[n:n+2]))
@@ -151,13 +149,12 @@ func (m *ClientHelloMsg) readCipherSuites(b []byte) (n int, err error) {
 
 func (m *ClientHelloMsg) readCompressionMethods(b []byte) (n int, err error) {
 	if len(b) == 0 {
-		err = fmt.Errorf("bad length: data too short for compression methods")
-		return
+		return 0, fmt.Errorf("bad length: data too short for compression methods")
 	}
 	nlen := int(b[0])
 	n++
 	if len(b) < n+nlen {
-		err = fmt.Errorf("bad length: malformed data for compression methods")
+		return 0, fmt.Errorf("bad length: malformed data for compression methods")
 	}
 	for i := 0; i < nlen; i++ {
 		m.CompressionMethods = append(m.CompressionMethods, b[n])
@@ -321,16 +318,15 @@ func (m *ServerHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 
 func (m *ServerHelloMsg) readSession(b []byte) (n int, err error) {
 	if len(b) == 0 {
-		err = fmt.Errorf("bad length: data too short for session")
-		return
+		return 0, fmt.Errorf("bad length: data too short for session")
 	}
 
 	nlen := int(b[0])
 	n++
 	if len(b) < n+nlen {
-		err = fmt.Errorf("bad length: malformed data for session")
+		return 0, fmt.Errorf("bad length: malformed data for session")
 	}
-	if nlen > 0 && n+nlen <= len(b) {
+	if nlen > 0 {
 		m.SessionID = make([]byte, nlen)
 		copy(m.SessionID, b[n:n+nlen])
 		n += nlen

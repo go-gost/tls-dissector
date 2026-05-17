@@ -1,7 +1,6 @@
 package dissector
 
 import (
-	"crypto/tls"
 	"fmt"
 	"io"
 )
@@ -87,7 +86,7 @@ func ParseServerHello(r io.Reader) (*ServerHelloInfo, error) {
 		SessionID:         msg.SessionID,
 		CipherSuite:       msg.CipherSuite,
 		CompressionMethod: msg.CompressionMethod,
-		Version:           tls.VersionTLS12,
+		Version:           uint16(msg.Version),
 	}
 
 	for _, ext := range msg.Extensions {

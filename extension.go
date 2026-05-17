@@ -60,7 +60,7 @@ func NewExtension(t uint16, data []byte) (ext Extension, err error) {
 		ext = new(RenegotiationInfoExtension)
 	default:
 		ext = &unknownExtension{
-			types: t,
+			typ: t,
 		}
 	}
 	if len(data) > 0 {
@@ -101,12 +101,12 @@ func readExtensions(b []byte) (exts []Extension, err error) {
 }
 
 type unknownExtension struct {
-	types uint16
-	raw   []byte
+	typ uint16
+	raw []byte
 }
 
 func (ext *unknownExtension) Type() uint16 {
-	return ext.types
+	return ext.typ
 }
 
 func (ext *unknownExtension) Encode() ([]byte, error) {
@@ -221,7 +221,10 @@ func (ext *SupportedGroupsExtension) Decode(b []byte) error {
 		return fmt.Errorf("supported_groups: %w", ErrShortBuffer)
 	}
 
-	n := int(binary.BigEndian.Uint16(b)) / 2 * 2 //make it even
+	n := int(binary.BigEndian.Uint16(b))
+	if n%2 != 0 {
+		return fmt.Errorf("supported_groups: odd group list length %d", n)
+	}
 	if len(b[2:]) < n {
 		return fmt.Errorf("supported_groups: %w", ErrShortBuffer)
 	}
@@ -368,7 +371,10 @@ func (ext *ALPNExtension) Decode(b []byte) error {
 	}
 	b = b[:alpnLen]
 
-	for {
+	for len(b) > 0 {
+		if len(b) < 1 {
+			return fmt.Errorf("application_layer_protocol_negotiation: %w", ErrShortBuffer)
+		}
 		n := int(b[0])
 		if len(b[1:]) < n {
 			return fmt.Errorf("application_layer_protocol_negotiation: %w", ErrShortBuffer)
@@ -379,9 +385,6 @@ func (ext *ALPNExtension) Decode(b []byte) error {
 		}
 
 		b = b[1+n:]
-		if len(b) == 0 {
-			break
-		}
 	}
 
 	return nil
@@ -441,16 +444,15 @@ func (ext *SupportedVersionsExtension) Decode(b []byte) error {
 	if len(b) < verLen {
 		return fmt.Errorf("supported_versions: %w", ErrShortBuffer)
 	}
+	if verLen%2 != 0 {
+		return fmt.Errorf("supported_versions: odd version list length %d", verLen)
+	}
 	b = b[:verLen]
 
-	for {
+	for len(b) > 0 {
 		ver := binary.BigEndian.Uint16(b[:2])
 		ext.Versions = append(ext.Versions, ver)
-
 		b = b[2:]
-		if len(b) == 0 {
-			break
-		}
 	}
 
 	return nil
