@@ -47,8 +47,8 @@ func (m *ClientHelloMsg) Decode(data []byte) (err error) {
 }
 
 func (m *ClientHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
-	b := make([]byte, handshakeHeaderLen)
-	nn, err := io.ReadFull(r, b)
+	var b [handshakeHeaderLen]byte
+	nn, err := io.ReadFull(r, b[:])
 	n += int64(nn)
 	if err != nil {
 		return
@@ -65,43 +65,43 @@ func (m *ClientHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 		return
 	}
 
-	b = make([]byte, length)
-	nn, err = io.ReadFull(r, b)
+	body := make([]byte, length)
+	nn, err = io.ReadFull(r, body)
 	n += int64(nn)
 	if err != nil {
 		return
 	}
-	m.Version = Version(binary.BigEndian.Uint16(b[:2]))
+	m.Version = Version(binary.BigEndian.Uint16(body[:2]))
 	if m.Version < tls.VersionTLS10 || m.Version > tls.VersionTLS13 {
 		err = fmt.Errorf("bad version %x", m.Version)
 		return
 	}
 
 	pos := 2
-	m.Random.Time = binary.BigEndian.Uint32(b[pos : pos+4])
+	m.Random.Time = binary.BigEndian.Uint32(body[pos : pos+4])
 	pos += 4
-	copy(m.Random.Opaque[:], b[pos:pos+28])
+	copy(m.Random.Opaque[:], body[pos:pos+28])
 	pos += 28
 
-	nn, err = m.readSession(b[pos:])
+	nn, err = m.readSession(body[pos:])
 	if err != nil {
 		return
 	}
 	pos += nn
 
-	nn, err = m.readCipherSuites(b[pos:])
+	nn, err = m.readCipherSuites(body[pos:])
 	if err != nil {
 		return
 	}
 	pos += nn
 
-	nn, err = m.readCompressionMethods(b[pos:])
+	nn, err = m.readCompressionMethods(body[pos:])
 	if err != nil {
 		return
 	}
 	pos += nn
 
-	_, err = m.readExtensions(b[pos:])
+	_, err = m.readExtensions(body[pos:])
 	if err != nil {
 		return
 	}
@@ -139,6 +139,7 @@ func (m *ClientHelloMsg) readCipherSuites(b []byte) (n int, err error) {
 	if len(b) < n+nlen {
 		return 0, fmt.Errorf("bad length: malformed data for cipher suites")
 	}
+		m.CipherSuites = make([]uint16, 0, nlen/2)
 	for i := 0; i < nlen/2; i++ {
 		m.CipherSuites = append(m.CipherSuites, binary.BigEndian.Uint16(b[n:n+2]))
 		n += 2
@@ -156,6 +157,7 @@ func (m *ClientHelloMsg) readCompressionMethods(b []byte) (n int, err error) {
 	if len(b) < n+nlen {
 		return 0, fmt.Errorf("bad length: malformed data for compression methods")
 	}
+		m.CompressionMethods = make([]uint8, 0, nlen)
 	for i := 0; i < nlen; i++ {
 		m.CompressionMethods = append(m.CompressionMethods, b[n])
 		n++
@@ -187,6 +189,7 @@ func (m *ClientHelloMsg) readExtensions(b []byte) (n int, err error) {
 
 func (m *ClientHelloMsg) WriteTo(w io.Writer) (n int64, err error) {
 	buf := &bytes.Buffer{}
+	buf.Grow(256)
 
 	buf.WriteByte(ClientHello)
 	buf.Write([]byte{0, 0, 0}) // placeholder for payload length
@@ -263,8 +266,8 @@ func (m *ServerHelloMsg) Decode(data []byte) (err error) {
 }
 
 func (m *ServerHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
-	b := make([]byte, handshakeHeaderLen)
-	nn, err := io.ReadFull(r, b)
+	var b [handshakeHeaderLen]byte
+	nn, err := io.ReadFull(r, b[:])
 	n += int64(nn)
 	if err != nil {
 		return
@@ -281,41 +284,41 @@ func (m *ServerHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 		return
 	}
 
-	b = make([]byte, length)
-	nn, err = io.ReadFull(r, b)
+	body := make([]byte, length)
+	nn, err = io.ReadFull(r, body)
 	n += int64(nn)
 	if err != nil {
 		return
 	}
-	m.Version = Version(binary.BigEndian.Uint16(b[:2]))
+	m.Version = Version(binary.BigEndian.Uint16(body[:2]))
 	if m.Version < tls.VersionTLS10 || m.Version > tls.VersionTLS13 {
 		err = fmt.Errorf("bad version %x", m.Version)
 		return
 	}
 
 	pos := 2
-	m.Random.Time = binary.BigEndian.Uint32(b[pos : pos+4])
+	m.Random.Time = binary.BigEndian.Uint32(body[pos : pos+4])
 	pos += 4
-	copy(m.Random.Opaque[:], b[pos:pos+28])
+	copy(m.Random.Opaque[:], body[pos:pos+28])
 	pos += 28
 
-	nn, err = m.readSession(b[pos:])
+	nn, err = m.readSession(body[pos:])
 	if err != nil {
 		return
 	}
 	pos += nn
 
-	if len(b)-pos < 3 {
+	if len(body)-pos < 3 {
 		err = fmt.Errorf("bad length: data too short for cipher suite and compression method")
 		return
 	}
-	m.CipherSuite = binary.BigEndian.Uint16(b[pos : pos+2])
+	m.CipherSuite = binary.BigEndian.Uint16(body[pos : pos+2])
 	pos += 2
 
-	m.CompressionMethod = b[pos]
+	m.CompressionMethod = body[pos]
 	pos++
 
-	_, err = m.readExtensions(b[pos:])
+	_, err = m.readExtensions(body[pos:])
 	if err != nil {
 		return
 	}

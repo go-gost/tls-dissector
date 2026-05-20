@@ -44,8 +44,8 @@ func ReadRecord(r io.Reader) (*Record, error) {
 }
 
 func (rec *Record) ReadFrom(r io.Reader) (n int64, err error) {
-	b := make([]byte, RecordHeaderLen)
-	nn, err := io.ReadFull(r, b)
+	var b [RecordHeaderLen]byte
+	nn, err := io.ReadFull(r, b[:])
 	n += int64(nn)
 	if err != nil {
 		return

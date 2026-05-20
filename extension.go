@@ -70,8 +70,8 @@ func NewExtension(t uint16, data []byte) (ext Extension, err error) {
 }
 
 func ReadExtension(r io.Reader) (Extension, error) {
-	b := make([]byte, extensionHeaderLen)
-	if _, err := io.ReadFull(r, b); err != nil {
+	var b [extensionHeaderLen]byte
+	if _, err := io.ReadFull(r, b[:]); err != nil {
 		return nil, err
 	}
 	t := binary.BigEndian.Uint16(b[:2])
@@ -229,6 +229,7 @@ func (ext *SupportedGroupsExtension) Decode(b []byte) error {
 		return fmt.Errorf("supported_groups: %w", ErrShortBuffer)
 	}
 
+	ext.Groups = make([]uint16, 0, n/2)
 	for i := 0; i < n; i += 2 {
 		ext.Groups = append(ext.Groups, binary.BigEndian.Uint16(b[2+i:]))
 	}
@@ -265,6 +266,7 @@ func (ext *SignatureAlgorithmsExtension) Decode(b []byte) error {
 		return fmt.Errorf("signature_algorithms: %w", ErrShortBuffer)
 	}
 
+	ext.Algorithms = make([]uint16, 0, n/2)
 	for i := 0; i < n; i += 2 {
 		ext.Algorithms = append(ext.Algorithms, binary.BigEndian.Uint16(b[2+i:]))
 	}
