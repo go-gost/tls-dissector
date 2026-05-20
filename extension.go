@@ -258,6 +258,9 @@ func (ext *SignatureAlgorithmsExtension) Decode(b []byte) error {
 	}
 
 	n := int(binary.BigEndian.Uint16(b))
+	if n%2 != 0 {
+		return fmt.Errorf("signature_algorithms: odd algorithm list length %d", n)
+	}
 	if len(b[2:]) < n {
 		return fmt.Errorf("signature_algorithms: %w", ErrShortBuffer)
 	}
@@ -350,6 +353,9 @@ func (ext *ALPNExtension) Encode() ([]byte, error) {
 		if proto == "" {
 			continue
 		}
+		if len(proto) > 255 {
+			return nil, fmt.Errorf("application_layer_protocol_negotiation: proto name too long (%d bytes)", len(proto))
+		}
 		buf.WriteByte(uint8(len(proto))) // proto value length
 		buf.WriteString(proto)
 	}
@@ -413,7 +419,14 @@ func (ext *SupportedVersionsExtension) Encode() ([]byte, error) {
 		return buf.Bytes(), nil
 	}
 
-	buf.WriteByte(uint8(len(ext.Versions) * 2))
+	// Count non-zero versions to compute accurate length
+	var count int
+	for _, v := range ext.Versions {
+		if v != 0 {
+			count++
+		}
+	}
+	buf.WriteByte(uint8(count * 2))
 
 	for _, version := range ext.Versions {
 		if version == 0 {

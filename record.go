@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
 const (
-	RecordHeaderLen = 5
+	RecordHeaderLen    = 5
+	MaxPlaintextLength = 16384 // 2^14, per TLS spec
 )
 
 // record content type
@@ -51,6 +53,9 @@ func (rec *Record) ReadFrom(r io.Reader) (n int64, err error) {
 	rec.Type = b[0]
 	rec.Version = Version(binary.BigEndian.Uint16(b[1:3]))
 	length := int(binary.BigEndian.Uint16(b[3:5]))
+	if length > MaxPlaintextLength {
+		return 0, fmt.Errorf("record length %d exceeds max %d", length, MaxPlaintextLength)
+	}
 	rec.Opaque = make([]byte, length)
 	nn, err = io.ReadFull(r, rec.Opaque)
 	n += int64(nn)

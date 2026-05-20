@@ -164,6 +164,10 @@ func (m *ClientHelloMsg) readCompressionMethods(b []byte) (n int, err error) {
 }
 
 func (m *ClientHelloMsg) readExtensions(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		// No extensions remaining — valid for TLS 1.2
+		return
+	}
 	if len(b) < 2 {
 		err = fmt.Errorf("bad length: data too short for extensions")
 		return
@@ -301,6 +305,10 @@ func (m *ServerHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 	}
 	pos += nn
 
+	if len(b)-pos < 3 {
+		err = fmt.Errorf("bad length: data too short for cipher suite and compression method")
+		return
+	}
 	m.CipherSuite = binary.BigEndian.Uint16(b[pos : pos+2])
 	pos += 2
 
@@ -336,6 +344,10 @@ func (m *ServerHelloMsg) readSession(b []byte) (n int, err error) {
 }
 
 func (m *ServerHelloMsg) readExtensions(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		// No extensions remaining — valid for TLS 1.2
+		return
+	}
 	if len(b) < 2 {
 		err = fmt.Errorf("bad length: data too short for extensions")
 		return

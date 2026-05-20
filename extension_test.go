@@ -452,13 +452,6 @@ func TestReadExtension(t *testing.T) {
 	}
 }
 
-func TestReadExtensionTruncated(t *testing.T) {
-	_, err := ReadExtension(bytes.NewReader([]byte{0x00, 0x00, 0x00}))
-	if err == nil {
-		t.Fatal("expected error for truncated extension header")
-	}
-}
-
 func TestReadExtensions(t *testing.T) {
 	ext1 := &ServerNameExtension{NameType: 0, Name: "example.com"}
 	ext2 := &ALPNExtension{Protos: []string{"h2"}}
@@ -571,21 +564,6 @@ func TestSupportedVersionsExtensionEncode_Empty(t *testing.T) {
 	}
 }
 
-func TestSupportedVersionsExtensionEncode_ZeroVersion(t *testing.T) {
-	ext := &SupportedVersionsExtension{
-		Versions: []uint16{0x0304, 0x0000, 0x0303}, // includes zero version
-	}
-	data, err := ext.Encode()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// Length byte counts all versions (3*2=6), but only 2 non-zero versions written (4 bytes)
-	// Encode writes len(Versions)*2 as the length, then skips version==0 in the loop
-	if len(data) == 0 {
-		t.Fatal("expected non-empty data")
-	}
-}
-
 func TestSupportedVersionsExtensionDecode_ShortVersionList(t *testing.T) {
 	// verLen says 4 bytes but only 2 follow after removing length byte
 	ext := &SupportedVersionsExtension{}
@@ -598,9 +576,103 @@ func TestSupportedVersionsExtensionDecode_ShortVersionList(t *testing.T) {
 	}
 }
 
-func TestReadExtension_HeaderError(t *testing.T) {
-	_, err := ReadExtension(bytes.NewReader([]byte{0x00}))
+func TestReadExtension_TruncatedHeader(t *testing.T) {
+	// 3 bytes of a 4-byte extension header — io.ReadFull should fail
+	_, err := ReadExtension(bytes.NewReader([]byte{0x00, 0x00, 0x00}))
 	if err == nil {
-		t.Fatal("expected error for truncated header")
+		t.Fatal("expected error for truncated extension header")
+	}
+}
+
+// Regression: BUG 2 — odd algorithm list length must return error, not panic
+func TestSignatureAlgorithmsDecode_OddLength(t *testing.T) {
+	data := []byte{0x00, 0x03, 0x04, 0x03, 0x05}
+	ext := &SignatureAlgorithmsExtension{}
+	err := ext.Decode(data)
+	if err == nil {
+		t.Fatal("expected error for odd algorithm list length")
+	}
+	if !strings.Contains(err.Error(), "odd") {
+		t.Errorf("error = %q, want containing 'odd'", err.Error())
+	}
+}
+
+// Regression: BUG 3 — versions with zeros must encode consistent length
+func TestSupportedVersionsEncode_WithZeroVersions(t *testing.T) {
+	ext := &SupportedVersionsExtension{
+		Versions: []uint16{0x0304, 0x0000, 0x0303},
+	}
+	data, err := ext.Encode()
+	if err != nil {
+		t.Fatalf("Encode error: %v", err)
+	}
+	if len(data) > 0 {
+		claimedLen := int(data[0])
+		actualLen := len(data) - 1
+		if claimedLen != actualLen {
+			t.Errorf("length mismatch: byte claims %d, but %d bytes follow", claimedLen, actualLen)
+		}
+		// Round-trip decode to verify
+		decoded := &SupportedVersionsExtension{}
+		if err := decoded.Decode(data); err != nil {
+			t.Fatalf("Decode error: %v", err)
+		}
+		if len(decoded.Versions) != 2 {
+			t.Errorf("decoded Versions count = %d, want 2 (zeros excluded)", len(decoded.Versions))
+		}
+	}
+}
+
+// Regression: BUG 4 — proto name >255 bytes must return error, not truncate
+func TestALPNEncode_LongProtoName(t *testing.T) {
+	longName := make([]byte, 300)
+	for i := range longName {
+		longName[i] = 'x'
+	}
+	ext := &ALPNExtension{
+		Protos: []string{string(longName)},
+	}
+	_, err := ext.Encode()
+	if err == nil {
+		t.Fatal("expected error for proto name exceeding 255 bytes")
+	}
+	if !strings.Contains(err.Error(), "too long") {
+		t.Errorf("error = %q, want containing 'too long'", err.Error())
+	}
+}
+
+func TestSupportedVersionsExtensionServerZeroVersion(t *testing.T) {
+	ext := &SupportedVersionsExtension{
+		Versions: []uint16{0x0000},
+		Server:   true,
+	}
+	data, err := ext.Encode()
+	if err != nil {
+		t.Fatalf("Encode error: %v", err)
+	}
+	if len(data) != 2 {
+		t.Fatalf("expected 2 bytes, got %d", len(data))
+	}
+	// Round-trip: Decode should produce Server=true with Version=[0]
+	decoded := &SupportedVersionsExtension{}
+	if err := decoded.Decode(data); err != nil {
+		t.Fatalf("Decode error: %v", err)
+	}
+	if len(decoded.Versions) != 1 || decoded.Versions[0] != 0 {
+		t.Errorf("Versions = %v, want [0]", decoded.Versions)
+	}
+	if !decoded.Server {
+		t.Error("Server should be true")
+	}
+}
+
+func TestSignatureAlgorithmsDecode_ValidTwoByteList(t *testing.T) {
+	ext := &SignatureAlgorithmsExtension{}
+	err := ext.Decode([]byte{0x00, 0x02, 0x04, 0x03})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ext.Algorithms) != 1 || ext.Algorithms[0] != 0x0403 {
+		t.Errorf("Algorithms = %v, want [0403]", ext.Algorithms)
 	}
 }

@@ -2,19 +2,10 @@ package dissector
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
+	"strings"
 	"testing"
 )
-
-func makeRecordBytes(contentType uint8, version Version, payload []byte) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(contentType)
-	binary.Write(buf, binary.BigEndian, version)
-	binary.Write(buf, binary.BigEndian, uint16(len(payload)))
-	buf.Write(payload)
-	return buf.Bytes()
-}
 
 func TestReadRecord(t *testing.T) {
 	tests := []struct {
@@ -144,9 +135,32 @@ func TestRecord_WriteTo_Error(t *testing.T) {
 	}
 }
 
-func TestReadRecord_EOF(t *testing.T) {
-	_, err := ReadRecord(bytes.NewReader([]byte{}))
+// Regression: BUG 6 — oversized record must be rejected
+func TestReadRecord_Oversized(t *testing.T) {
+	data := make([]byte, RecordHeaderLen+MaxPlaintextLength+1)
+	data[0] = Handshake
+	data[3] = byte((MaxPlaintextLength + 1) >> 8)
+	data[4] = byte((MaxPlaintextLength + 1) & 0xFF)
+	_, err := ReadRecord(bytes.NewReader(data))
 	if err == nil {
-		t.Fatal("expected EOF error")
+		t.Fatal("expected error for oversized record")
+	}
+	if !strings.Contains(err.Error(), "exceeds max") {
+		t.Errorf("error = %q, want containing 'exceeds max'", err.Error())
+	}
+}
+
+func TestReadRecord_MaxBoundary(t *testing.T) {
+	payload := make([]byte, MaxPlaintextLength)
+	for i := range payload {
+		payload[i] = 0xAB
+	}
+	data := makeRecordBytes(Handshake, 0x0303, payload)
+	rec, err := ReadRecord(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("expected success at max boundary, got: %v", err)
+	}
+	if len(rec.Opaque) != MaxPlaintextLength {
+		t.Errorf("Opaque length = %d, want %d", len(rec.Opaque), MaxPlaintextLength)
 	}
 }

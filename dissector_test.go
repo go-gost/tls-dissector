@@ -2,20 +2,10 @@ package dissector
 
 import (
 	"bytes"
-	"encoding/binary"
 	"reflect"
 	"strings"
 	"testing"
 )
-
-func wrapInRecord(contentType uint8, payload []byte) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(contentType)
-	binary.Write(buf, binary.BigEndian, Version(0x0303))
-	binary.Write(buf, binary.BigEndian, uint16(len(payload)))
-	buf.Write(payload)
-	return buf.Bytes()
-}
 
 func TestParseClientHello(t *testing.T) {
 	msg := makeClientHelloMsg()
@@ -24,7 +14,7 @@ func TestParseClientHello(t *testing.T) {
 		t.Fatalf("Encode error: %v", err)
 	}
 
-	record := wrapInRecord(Handshake, body)
+	record := makeRecordBytes(Handshake, 0x0303, body)
 	info, err := ParseClientHello(bytes.NewReader(record))
 	if err != nil {
 		t.Fatalf("ParseClientHello error: %v", err)
@@ -60,7 +50,7 @@ func TestParseClientHelloMinimal(t *testing.T) {
 		Extensions:         nil,
 	}
 	body, _ := msg.Encode()
-	record := wrapInRecord(Handshake, body)
+	record := makeRecordBytes(Handshake, 0x0303, body)
 
 	info, err := ParseClientHello(bytes.NewReader(record))
 	if err != nil {
@@ -78,7 +68,7 @@ func TestParseClientHelloMinimal(t *testing.T) {
 }
 
 func TestParseClientHelloBadRecord(t *testing.T) {
-	record := wrapInRecord(AppData, []byte("hello"))
+	record := makeRecordBytes(AppData, 0x0303, []byte("hello"))
 	_, err := ParseClientHello(bytes.NewReader(record))
 	if err == nil {
 		t.Fatal("expected error for non-handshake record")
@@ -102,7 +92,7 @@ func TestParseServerHello(t *testing.T) {
 		t.Fatalf("Encode error: %v", err)
 	}
 
-	record := wrapInRecord(Handshake, body)
+	record := makeRecordBytes(Handshake, 0x0303, body)
 	info, err := ParseServerHello(bytes.NewReader(record))
 	if err != nil {
 		t.Fatalf("ParseServerHello error: %v", err)
@@ -139,7 +129,7 @@ func TestParseServerHelloVersionFromMsg(t *testing.T) {
 		t.Fatalf("Encode error: %v", err)
 	}
 
-	record := wrapInRecord(Handshake, body)
+	record := makeRecordBytes(Handshake, 0x0303, body)
 	info, err := ParseServerHello(bytes.NewReader(record))
 	if err != nil {
 		t.Fatalf("ParseServerHello error: %v", err)
@@ -157,7 +147,7 @@ func TestParseServerHelloAlert(t *testing.T) {
 		t.Fatalf("Alert Encode error: %v", err)
 	}
 
-	record := wrapInRecord(EncryptedAlert, body)
+	record := makeRecordBytes(EncryptedAlert, 0x0303, body)
 	_, err = ParseServerHello(bytes.NewReader(record))
 	if err == nil {
 		t.Fatal("expected ErrAlert")
@@ -168,7 +158,7 @@ func TestParseServerHelloAlert(t *testing.T) {
 }
 
 func TestParseServerHelloBadRecord(t *testing.T) {
-	record := wrapInRecord(AppData, []byte("data"))
+	record := makeRecordBytes(AppData, 0x0303, []byte("data"))
 	_, err := ParseServerHello(bytes.NewReader(record))
 	if err == nil {
 		t.Fatal("expected error for non-handshake record")
@@ -189,7 +179,7 @@ func TestParseClientHello_BadDecode(t *testing.T) {
 	// Valid record, but handshake message has wrong type (ServerHello instead of ClientHello)
 	sh := makeServerHelloMsg()
 	body, _ := sh.Encode()
-	record := wrapInRecord(Handshake, body)
+	record := makeRecordBytes(Handshake, 0x0303, body)
 	_, err := ParseClientHello(bytes.NewReader(record))
 	if err == nil {
 		t.Fatal("expected error for bad ClientHello decode")
@@ -210,7 +200,7 @@ func TestParseClientHello_TruncatedRecord(t *testing.T) {
 
 func TestParseServerHello_AlertDecodeError(t *testing.T) {
 	// Alert record with truncated alert (only 1 byte, needs 2)
-	record := wrapInRecord(EncryptedAlert, []byte{0x02})
+	record := makeRecordBytes(EncryptedAlert, 0x0303, []byte{0x02})
 	_, err := ParseServerHello(bytes.NewReader(record))
 	if err == nil {
 		t.Fatal("expected error for truncated alert")
@@ -221,7 +211,7 @@ func TestParseServerHello_BadDecode(t *testing.T) {
 	// Valid record, but handshake message has wrong type (ClientHello instead of ServerHello)
 	ch := makeClientHelloMsg()
 	body, _ := ch.Encode()
-	record := wrapInRecord(Handshake, body)
+	record := makeRecordBytes(Handshake, 0x0303, body)
 	_, err := ParseServerHello(bytes.NewReader(record))
 	if err == nil {
 		t.Fatal("expected error for bad ServerHello decode")
