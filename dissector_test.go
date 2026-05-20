@@ -184,3 +184,49 @@ func TestParseServerHelloTruncated(t *testing.T) {
 		t.Fatal("expected error for empty reader")
 	}
 }
+
+func TestParseClientHello_BadDecode(t *testing.T) {
+	// Valid record, but handshake message has wrong type (ServerHello instead of ClientHello)
+	sh := makeServerHelloMsg()
+	body, _ := sh.Encode()
+	record := wrapInRecord(Handshake, body)
+	_, err := ParseClientHello(bytes.NewReader(record))
+	if err == nil {
+		t.Fatal("expected error for bad ClientHello decode")
+	}
+	if !strings.Contains(err.Error(), "bad type") {
+		t.Errorf("error = %q, want containing 'bad type'", err.Error())
+	}
+}
+
+func TestParseClientHello_TruncatedRecord(t *testing.T) {
+	// Handshake record header with payload that's too short
+	record := []byte{Handshake, 0x03, 0x03, 0x00, 0x05} // 5-byte payload, but none follows
+	_, err := ParseClientHello(bytes.NewReader(record))
+	if err == nil {
+		t.Fatal("expected error for truncated record")
+	}
+}
+
+func TestParseServerHello_AlertDecodeError(t *testing.T) {
+	// Alert record with truncated alert (only 1 byte, needs 2)
+	record := wrapInRecord(EncryptedAlert, []byte{0x02})
+	_, err := ParseServerHello(bytes.NewReader(record))
+	if err == nil {
+		t.Fatal("expected error for truncated alert")
+	}
+}
+
+func TestParseServerHello_BadDecode(t *testing.T) {
+	// Valid record, but handshake message has wrong type (ClientHello instead of ServerHello)
+	ch := makeClientHelloMsg()
+	body, _ := ch.Encode()
+	record := wrapInRecord(Handshake, body)
+	_, err := ParseServerHello(bytes.NewReader(record))
+	if err == nil {
+		t.Fatal("expected error for bad ServerHello decode")
+	}
+	if !strings.Contains(err.Error(), "bad type") {
+		t.Errorf("error = %q, want containing 'bad type'", err.Error())
+	}
+}

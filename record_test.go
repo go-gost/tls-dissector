@@ -131,3 +131,22 @@ func TestConstants(t *testing.T) {
 		t.Errorf("RecordHeaderLen = %d, want 5", RecordHeaderLen)
 	}
 }
+
+func TestRecord_WriteTo_Error(t *testing.T) {
+	rec := &Record{
+		Type:    Handshake,
+		Version: 0x0303,
+		Opaque:  []byte("data"),
+	}
+	_, err := rec.WriteTo(failingWriter{})
+	if err == nil {
+		t.Fatal("expected write error")
+	}
+}
+
+func TestReadRecord_EOF(t *testing.T) {
+	_, err := ReadRecord(bytes.NewReader([]byte{}))
+	if err == nil {
+		t.Fatal("expected EOF error")
+	}
+}

@@ -2,10 +2,22 @@ package dissector
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+type errorExtension struct{}
+
+func (e *errorExtension) Type() uint16           { return 0xFFFF }
+func (e *errorExtension) Encode() ([]byte, error) { return nil, errors.New("encode error") }
+func (e *errorExtension) Decode(b []byte) error   { return nil }
+
+type failingWriter struct{}
+
+func (f failingWriter) Write([]byte) (int, error) { return 0, errors.New("write error") }
 
 func makeClientHelloMsg() *ClientHelloMsg {
 	return &ClientHelloMsg{
@@ -327,8 +339,37 @@ func TestAlertDescriptionString(t *testing.T) {
 		want string
 	}{
 		{0, "close notify"},
+		{10, "unexpected message"},
+		{20, "bad record mac"},
+		{21, "decryption failed RESERVED"},
+		{22, "record overflow"},
+		{30, "decompression failure"},
 		{40, "handshake failure"},
+		{41, "no certificate RESERVED"},
+		{42, "bad certificate"},
+		{43, "unsupported certificate"},
+		{44, "certificate revoked"},
+		{45, "certificate expired"},
+		{46, "certificate unknown"},
+		{47, "illegal parameter"},
+		{48, "unknown ca"},
+		{49, "access denied"},
+		{50, "decode error"},
+		{51, "decrypt error"},
+		{60, "export restriction RESERVED"},
 		{70, "protocol version"},
+		{71, "insufficient security"},
+		{80, "internal error"},
+		{86, "inappropriate fallback"},
+		{90, "user canceled"},
+		{100, "no renegotiation"},
+		{110, "unsupported extension"},
+		{111, "certificate unobtainable"},
+		{112, "unrecognized name"},
+		{113, "bad certificate status response"},
+		{114, "bad certificate hash value"},
+		{115, "unknown PSK identity"},
+		{116, "certificate required"},
 		{120, "no application protocol"},
 		{255, "unknown desc: 255"},
 	}
@@ -337,5 +378,385 @@ func TestAlertDescriptionString(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("AlertDescription(%d).String() = %q, want %q", tt.desc, got, tt.want)
 		}
+	}
+}
+
+// Test decode errors for readSession, readCipherSuites, readCompressionMethods, readExtensions
+func TestClientHelloMsgDecodeMalformed(t *testing.T) {
+	valid := &ClientHelloMsg{
+		Version:            0x0303,
+		Random:             Random{Time: 0},
+		SessionID:          []byte{0xAA},
+		CipherSuites:       []uint16{0xC02B},
+		CompressionMethods: []uint8{0x00},
+	}
+	validEncoded, err := valid.Encode()
+	if err != nil {
+		t.Fatalf("Encode error: %v", err)
+	}
+
+	// must copy validEncoded to avoid shared-slice mutation across subtests
+	copyOf := func(b []byte) []byte {
+		c := make([]byte, len(b))
+		copy(c, b)
+		return c
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func([]byte) []byte
+		wantErr string
+	}{
+		{
+			name: "session length claims too much",
+			mutate: func(b []byte) []byte {
+				b[38] = 100 // session len
+				return b
+			},
+			wantErr: "malformed data for session",
+		},
+		{
+			name: "cipher suites length claims too much",
+			mutate: func(b []byte) []byte {
+				b[40] = 0x01 // cipher suites len = 256
+				b[41] = 0x00
+				return b
+			},
+			wantErr: "malformed data for cipher suites",
+		},
+		{
+			name: "compression methods length claims too much",
+			mutate: func(b []byte) []byte {
+				b[44] = 100 // comp methods len
+				return b
+			},
+			wantErr: "malformed data for compression methods",
+		},
+		{
+			name: "extensions length claims too much",
+			mutate: func(b []byte) []byte {
+				b[46] = 0xFF
+				b[47] = 0xFF
+				return b
+			},
+			wantErr: "malformed data for extensions",
+		},
+		{
+			name: "payload too short for session byte",
+			mutate: func(b []byte) []byte {
+				// Set payload length to exactly 34 (version + random only)
+				data := make([]byte, 4+34)
+				copy(data, b[:4+34])
+				binary.BigEndian.PutUint16(data[1:3], 0)
+				data[3] = 34
+				return data
+			},
+			wantErr: "data too short for session",
+		},
+		{
+			name: "truncated in middle of session data",
+			mutate: func(b []byte) []byte {
+				// Payload includes version+random+session_len(1) but no session data
+				data := make([]byte, 4+35)
+				copy(data, b[:4+35])
+				binary.BigEndian.PutUint16(data[1:3], 0)
+				data[3] = 35
+				return data
+			},
+			wantErr: "malformed data for session",
+		},
+		{
+			name: "truncated before cipher suites header",
+			mutate: func(b []byte) []byte {
+				// Payload includes version+random+session, but truncated before cipher suites length
+				// 34 + session(1+1=2) = 36, then cipher needs 2 bytes. Cut at 37.
+				data := make([]byte, 4+37)
+				copy(data, b[:4+37])
+				binary.BigEndian.PutUint16(data[1:3], 0)
+				data[3] = 37
+				return data
+			},
+			wantErr: "data too short for cipher suites",
+		},
+		{
+			name: "truncated before compression header",
+			mutate: func(b []byte) []byte {
+				// Payload needs: version+random(34) + session(2) + cipher(4) = 40 just enough
+				// 4+40 = 44. At 40 bytes payload, readCompressionMethods gets empty input.
+				data := make([]byte, 4+40)
+				copy(data, b[:4+40])
+				binary.BigEndian.PutUint16(data[1:3], 0)
+				data[3] = 40
+				return data
+			},
+			wantErr: "data too short for compression methods",
+		},
+		{
+			name: "truncated before extensions header",
+			mutate: func(b []byte) []byte {
+				// Payload needs: version+random(34) + session(2) + cipher(4) + comp(2) = 42
+				data := make([]byte, 4+42)
+				copy(data, b[:4+42])
+				binary.BigEndian.PutUint16(data[1:3], 0)
+				data[3] = 42
+				return data
+			},
+			wantErr: "data too short for extensions",
+		},
+		{
+			name: "corrupt extension in middle",
+			mutate: func(b []byte) []byte {
+				full := makeClientHelloMsg()
+				fb, _ := full.Encode()
+				// Truncate to corrupt the second extension
+				extStart := len(fb) - 2
+				for i := extStart - 2; i > 50; i-- {
+					if fb[i] == 0 && fb[i+1] == 0x10 { // ExtALPN marker
+						return fb[:i+3]
+					}
+				}
+				return fb[:len(fb)-5]
+			},
+			wantErr: "EOF",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &ClientHelloMsg{}
+			err := msg.Decode(tt.mutate(copyOf(validEncoded)))
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestClientHelloMsgEncodeError(t *testing.T) {
+	msg := &ClientHelloMsg{
+		Version:            0x0303,
+		Random:             Random{Time: 0},
+		Extensions:         []Extension{&errorExtension{}},
+		CipherSuites:       []uint16{0xC02B},
+		CompressionMethods: []uint8{0x00},
+	}
+	_, err := msg.Encode()
+	if err == nil {
+		t.Fatal("expected error from extension encode, got nil")
+	}
+}
+
+func TestServerHelloMsgEncodeError(t *testing.T) {
+	msg := &ServerHelloMsg{
+		Version:           0x0303,
+		Random:            Random{Time: 0},
+		CipherSuite:       0xC02B,
+		CompressionMethod: 0x00,
+		Extensions:        []Extension{&errorExtension{}},
+	}
+	_, err := msg.Encode()
+	if err == nil {
+		t.Fatal("expected error from extension encode, got nil")
+	}
+}
+
+func TestClientHelloMsgWriteToError(t *testing.T) {
+	msg := makeClientHelloMsg()
+	_, err := msg.WriteTo(failingWriter{})
+	if err == nil {
+		t.Fatal("expected write error")
+	}
+}
+
+func TestServerHelloMsgWriteToError(t *testing.T) {
+	msg := makeServerHelloMsg()
+	_, err := msg.WriteTo(failingWriter{})
+	if err == nil {
+		t.Fatal("expected write error")
+	}
+}
+
+func TestClientHelloMsgDecodeBadVersion(t *testing.T) {
+	msg := &ClientHelloMsg{
+		Version:            0x0303,
+		Random:             Random{Time: 0},
+		SessionID:          []byte{0xAA},
+		CipherSuites:       []uint16{0xC02B},
+		CompressionMethods: []uint8{0x00},
+	}
+	encoded, _ := msg.Encode()
+	// Corrupt the version bytes in the payload (offset 4+2=6: msg type + 3 len + handshake type + 3 len)
+	// Actually: record header is stripped. The encoded data from Encode() is just the handshake message body.
+	// Body: 1(type) + 3(len) + 2(version) + 32(random) + ...
+	// Version is at offset 4 in the body
+	encoded[4] = 0x04 // make version 0x04xx which is > TLS 1.3
+	encoded[5] = 0x00
+
+	decoded := &ClientHelloMsg{}
+	err := decoded.Decode(encoded)
+	if err == nil {
+		t.Fatal("expected bad version error")
+	}
+	if !strings.Contains(err.Error(), "bad version") {
+		t.Errorf("error = %q, want containing 'bad version'", err.Error())
+	}
+}
+
+func TestServerHelloMsgDecodeBadVersion(t *testing.T) {
+	msg := &ServerHelloMsg{
+		Version:           0x0303,
+		Random:            Random{Time: 0},
+		CipherSuite:       0xC02B,
+		CompressionMethod: 0x00,
+	}
+	encoded, _ := msg.Encode()
+	encoded[4] = 0x04
+	encoded[5] = 0x00
+
+	decoded := &ServerHelloMsg{}
+	err := decoded.Decode(encoded)
+	if err == nil {
+		t.Fatal("expected bad version error")
+	}
+	if !strings.Contains(err.Error(), "bad version") {
+		t.Errorf("error = %q, want containing 'bad version'", err.Error())
+	}
+}
+
+func TestServerHelloMsgDecodeMalformed(t *testing.T) {
+	valid := &ServerHelloMsg{
+		Version:           0x0303,
+		Random:            Random{Time: 0},
+		SessionID:         []byte{0xAA},
+		CipherSuite:       0xC02B,
+		CompressionMethod: 0x00,
+	}
+	validEncoded, _ := valid.Encode()
+
+	copyOf := func(b []byte) []byte {
+		c := make([]byte, len(b))
+		copy(c, b)
+		return c
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func([]byte) []byte
+		wantErr string
+	}{
+		{
+			name: "server session malformed",
+			mutate: func(b []byte) []byte {
+				b[38] = 100
+				return b
+			},
+			wantErr: "malformed data for session",
+		},
+		{
+			name: "server extensions malformed",
+			mutate: func(b []byte) []byte {
+				// After session(1+1) + cipher(2) + compression(1) = 5 bytes from offset 38
+				// cipher suite and compression stay at their offsets
+				// So: session len=1 at [38], session=[39], cipher=[40-41], comp=[42]
+				// extensions len at [43-44]
+				// But wait: session is 1 byte so 1+1=2 bytes; cipher=2 bytes; comp=1 byte
+				// Offset: 38(session len) + 1+1 + 2 + 1 = 43 (extensions len)
+				b[43] = 0xFF
+				b[44] = 0xFF
+				return b
+			},
+			wantErr: "malformed data for extensions",
+		},
+		{
+			name: "server too short for session",
+			mutate: func(b []byte) []byte {
+				data := make([]byte, 4+34)
+				copy(data, b[:4+34])
+				binary.BigEndian.PutUint16(data[1:3], 0)
+				data[3] = 34
+				return data
+			},
+			wantErr: "data too short for session",
+		},
+		{
+			name: "server too short for extensions",
+			mutate: func(b []byte) []byte {
+				// 34 + session(2) + cipher(2) + comp(1) = 39, cut at 39 to leave 0 bytes for extensions
+				data := make([]byte, 4+39)
+				copy(data, b[:4+39])
+				binary.BigEndian.PutUint16(data[1:3], 0)
+				data[3] = 39
+				return data
+			},
+			wantErr: "data too short for extensions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &ServerHelloMsg{}
+			err := msg.Decode(tt.mutate(copyOf(validEncoded)))
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestClientHelloMsgReadFromErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		wantErr string
+	}{
+		{
+			name: "handshake header truncated",
+			data: []byte{ClientHello, 0x00},
+			wantErr: "EOF",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &ClientHelloMsg{}
+			_, err := msg.ReadFrom(bytes.NewReader(tt.data))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestServerHelloMsgReadFromErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		wantErr string
+	}{
+		{
+			name: "handshake header truncated",
+			data: []byte{ServerHello, 0x00},
+			wantErr: "EOF",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &ServerHelloMsg{}
+			_, err := msg.ReadFrom(bytes.NewReader(tt.data))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }

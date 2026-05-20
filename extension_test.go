@@ -502,3 +502,105 @@ func TestReadExtensionsEmpty(t *testing.T) {
 		t.Errorf("got %d extensions, want 0", len(exts))
 	}
 }
+
+func TestReadExtension_TruncatedBody(t *testing.T) {
+	// Header says body is 100 bytes, but only 3 follow
+	data := []byte{0x00, 0x00, 0x00, 100, 0x01, 0x02}
+	_, err := ReadExtension(bytes.NewReader(data))
+	if err == nil {
+		t.Fatal("expected error for truncated extension body")
+	}
+}
+
+func TestReadExtensions_MidStreamError(t *testing.T) {
+	// First extension is complete and valid, second is truncated
+	ext1 := &ServerNameExtension{NameType: 0, Name: "example.com"}
+	ed1, _ := ext1.Encode()
+
+	buf := new(bytes.Buffer)
+	// Valid first extension
+	buf.WriteByte(byte(ExtServerName >> 8))
+	buf.WriteByte(byte(ExtServerName & 0xFF))
+	buf.WriteByte(byte(len(ed1) >> 8))
+	buf.WriteByte(byte(len(ed1) & 0xFF))
+	buf.Write(ed1)
+	// Corrupt second extension: header says body is 200 bytes, but none follow
+	buf.WriteByte(byte(ExtALPN >> 8))
+	buf.WriteByte(byte(ExtALPN & 0xFF))
+	buf.WriteByte(0x00)
+	buf.WriteByte(200)
+
+	_, err := readExtensions(buf.Bytes())
+	if err == nil {
+		t.Fatal("expected error from mid-stream extension read")
+	}
+}
+
+func TestALPNExtensionDecode_MissingProtoLen(t *testing.T) {
+	// ALPN list length says 2 bytes but there's only 1 (no room for proto length byte)
+	ext := &ALPNExtension{}
+	err := ext.Decode([]byte{0x00, 0x01})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "short buffer") {
+		t.Errorf("error = %q, want containing 'short buffer'", err.Error())
+	}
+}
+
+func TestALPNExtensionDecode_TruncatedProto(t *testing.T) {
+	// First proto reads fine (len=2, 'h2'), second proto claims 10 bytes but only 0 remain
+	ext := &ALPNExtension{}
+	err := ext.Decode([]byte{0x00, 0x04, 0x02, 0x68, 0x32, 0x0A})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "short buffer") {
+		t.Errorf("error = %q, want containing 'short buffer'", err.Error())
+	}
+}
+
+func TestSupportedVersionsExtensionEncode_Empty(t *testing.T) {
+	ext := &SupportedVersionsExtension{Versions: nil}
+	data, err := ext.Encode()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data != nil {
+		t.Errorf("expected nil data for empty versions, got %v", data)
+	}
+}
+
+func TestSupportedVersionsExtensionEncode_ZeroVersion(t *testing.T) {
+	ext := &SupportedVersionsExtension{
+		Versions: []uint16{0x0304, 0x0000, 0x0303}, // includes zero version
+	}
+	data, err := ext.Encode()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Length byte counts all versions (3*2=6), but only 2 non-zero versions written (4 bytes)
+	// Encode writes len(Versions)*2 as the length, then skips version==0 in the loop
+	if len(data) == 0 {
+		t.Fatal("expected non-empty data")
+	}
+}
+
+func TestSupportedVersionsExtensionDecode_ShortVersionList(t *testing.T) {
+	// verLen says 4 bytes but only 2 follow after removing length byte
+	ext := &SupportedVersionsExtension{}
+	err := ext.Decode([]byte{0x04, 0x03, 0x04})
+	if err == nil {
+		t.Fatal("expected error for truncated version list")
+	}
+	if !strings.Contains(err.Error(), "short buffer") {
+		t.Errorf("error = %q, want containing 'short buffer'", err.Error())
+	}
+}
+
+func TestReadExtension_HeaderError(t *testing.T) {
+	_, err := ReadExtension(bytes.NewReader([]byte{0x00}))
+	if err == nil {
+		t.Fatal("expected error for truncated header")
+	}
+}
