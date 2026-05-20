@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(perl -i -pe 's/make\\\\\\(\\\\[\\\\]byte, 4\\\\+42\\\\\\)/make\\([]byte, 4+43\\)/' /config/workspace/go-gost/tls-dissector/msg_test.go)",
+      "Bash(perl -i -pe 's/data\\\\[3\\\\] = 42/data[3] = 43/' /config/workspace/go-gost/tls-dissector/msg_test.go)",
+      "Bash(perl -i -pe 's/make\\\\\\(\\\\[\\\\]byte, 4\\\\+39\\\\\\)/make\\([]byte, 4+40\\)/' /config/workspace/go-gost/tls-dissector/msg_test.go)",
+      "Bash(perl -i -pe 's/data\\\\[3\\\\] = 39/data[3] = 40/' /config/workspace/go-gost/tls-dissector/msg_test.go)",
+      "Bash(perl -e ':*)",
+      "Bash(perl -i -pe 's/body\\\\[0\\\\] = ServerHello\\\\n\\\\t\\\\t\\\\tbody\\\\[3\\\\] = byte\\\\\\(tt\\\\.bodyLen\\\\\\)/body[0] = ServerHello\\\\n\\\\t\\\\t\\\\tbinary.BigEndian.PutUint16\\(body[4:6], 0x0303\\)\\\\n\\\\t\\\\t\\\\tbody[3] = byte\\(tt.bodyLen\\)/' /config/workspace/go-gost/tls-dissector/msg_test.go)",
+      "Bash(gh pr:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
