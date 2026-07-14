@@ -13,16 +13,22 @@ const (
 )
 
 const (
-	ExtServerName           uint16 = 0x00
-	ExtSupportedGroups      uint16 = 0x0a
-	ExtECPointFormats       uint16 = 0x0b
-	ExtSignatureAlgorithms  uint16 = 0x0d
-	ExtALPN                 uint16 = 0x10
-	ExtEncryptThenMac       uint16 = 0x16
-	ExtExtendedMasterSecret uint16 = 0x17
-	ExtSessionTicket        uint16 = 0x23
-	ExtSupportedVersions    uint16 = 0x2b
-	ExtRenegotiationInfo    uint16 = 0xff01
+	ExtServerName              uint16 = 0x00
+	ExtSupportedGroups         uint16 = 0x0a
+	ExtECPointFormats          uint16 = 0x0b
+	ExtSignatureAlgorithms     uint16 = 0x0d
+	ExtALPN                    uint16 = 0x10
+	ExtEncryptThenMac          uint16 = 0x16
+	ExtExtendedMasterSecret    uint16 = 0x17
+	ExtSessionTicket           uint16 = 0x23
+	ExtPreSharedKey            uint16 = 0x29
+	ExtEarlyData               uint16 = 0x2a
+	ExtSupportedVersions       uint16 = 0x2b
+	ExtCookie                  uint16 = 0x2c
+	ExtPskKeyExchangeModes     uint16 = 0x2d
+	ExtSignatureAlgorithmsCert uint16 = 0x32
+	ExtKeyShare                uint16 = 0x33
+	ExtRenegotiationInfo       uint16 = 0xff01
 )
 
 var (
@@ -56,6 +62,18 @@ func NewExtension(t uint16, data []byte) (ext Extension, err error) {
 		ext = new(SessionTicketExtension)
 	case ExtSupportedVersions:
 		ext = new(SupportedVersionsExtension)
+	case ExtKeyShare:
+		ext = new(KeyShareExtension)
+	case ExtPreSharedKey:
+		ext = new(PreSharedKeyExtension)
+	case ExtPskKeyExchangeModes:
+		ext = new(PskKeyExchangeModesExtension)
+	case ExtSignatureAlgorithmsCert:
+		ext = new(SignatureAlgorithmsCertExtension)
+	case ExtCookie:
+		ext = new(CookieExtension)
+	case ExtEarlyData:
+		ext = new(EarlyDataExtension)
 	case ExtRenegotiationInfo:
 		ext = new(RenegotiationInfoExtension)
 	default:
@@ -480,4 +498,315 @@ func (ext *SupportedVersionsExtension) Decode(b []byte) error {
 	}
 
 	return nil
+}
+
+type KeyShareEntry struct {
+	Group       uint16
+	KeyExchange []byte
+}
+
+type KeyShareExtension struct {
+	Entries []KeyShareEntry
+	Server  bool
+}
+
+func (ext *KeyShareExtension) Type() uint16 {
+	return ExtKeyShare
+}
+
+func (ext *KeyShareExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+
+	if ext.Server {
+		if len(ext.Entries) == 0 {
+			return nil, nil
+		}
+		e := ext.Entries[0]
+		binary.Write(buf, binary.BigEndian, e.Group)
+		binary.Write(buf, binary.BigEndian, uint16(len(e.KeyExchange)))
+		buf.Write(e.KeyExchange)
+		return buf.Bytes(), nil
+	}
+
+	// ClientHello: 2-byte total length + entries
+	body := &bytes.Buffer{}
+	for _, e := range ext.Entries {
+		binary.Write(body, binary.BigEndian, e.Group)
+		binary.Write(body, binary.BigEndian, uint16(len(e.KeyExchange)))
+		body.Write(e.KeyExchange)
+	}
+	binary.Write(buf, binary.BigEndian, uint16(body.Len()))
+	buf.Write(body.Bytes())
+	return buf.Bytes(), nil
+}
+
+func (ext *KeyShareExtension) Decode(b []byte) error {
+	if len(b) < 2 {
+		return fmt.Errorf("key_share: %w", ErrShortBuffer)
+	}
+
+	// Heuristic: if data is exactly one KeyShareEntry without outer length
+	// prefix, it's ServerHello format. A ServerHello key_share for x25519
+	// is 36 bytes (2+2+32); a ClientHello with one x25519 entry is 38
+	// bytes (2 total-len + 2+2+32).
+	if len(b) >= 4 {
+		keyLen := int(binary.BigEndian.Uint16(b[2:4]))
+		if 4+keyLen == len(b) {
+			ext.Server = true
+			ext.Entries = append(ext.Entries, KeyShareEntry{
+				Group:       binary.BigEndian.Uint16(b[0:2]),
+				KeyExchange: cloneBytes(b[4 : 4+keyLen]),
+			})
+			return nil
+		}
+	}
+
+	// ClientHello: 2-byte total length + entries
+	bodyLen := int(binary.BigEndian.Uint16(b[:2]))
+	b = b[2:]
+	if len(b) < bodyLen {
+		return fmt.Errorf("key_share: %w", ErrShortBuffer)
+	}
+	b = b[:bodyLen]
+
+	for len(b) > 0 {
+		if len(b) < 4 {
+			return fmt.Errorf("key_share: %w", ErrShortBuffer)
+		}
+		group := binary.BigEndian.Uint16(b[0:2])
+		keyLen := int(binary.BigEndian.Uint16(b[2:4]))
+		if len(b[4:]) < keyLen {
+			return fmt.Errorf("key_share: %w", ErrShortBuffer)
+		}
+		ext.Entries = append(ext.Entries, KeyShareEntry{
+			Group:       group,
+			KeyExchange: cloneBytes(b[4 : 4+keyLen]),
+		})
+		b = b[4+keyLen:]
+	}
+	return nil
+}
+
+type PskKeyExchangeModesExtension struct {
+	Modes []uint8
+}
+
+func (ext *PskKeyExchangeModesExtension) Type() uint16 {
+	return ExtPskKeyExchangeModes
+}
+
+func (ext *PskKeyExchangeModesExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	buf.WriteByte(uint8(len(ext.Modes)))
+	buf.Write(ext.Modes)
+	return buf.Bytes(), nil
+}
+
+func (ext *PskKeyExchangeModesExtension) Decode(b []byte) error {
+	if len(b) < 1 {
+		return fmt.Errorf("psk_key_exchange_modes: %w", ErrShortBuffer)
+	}
+	n := int(b[0])
+	if len(b[1:]) < n {
+		return fmt.Errorf("psk_key_exchange_modes: %w", ErrShortBuffer)
+	}
+	if n > 0 {
+		ext.Modes = make([]uint8, n)
+		copy(ext.Modes, b[1:1+n])
+	}
+	return nil
+}
+
+type PreSharedKeyExtension struct {
+	Identities       []PskIdentity
+	Binders          [][]byte
+	SelectedIdentity uint16
+	Server           bool
+}
+
+type PskIdentity struct {
+	Identity            []byte
+	ObfuscatedTicketAge uint32
+}
+
+func (ext *PreSharedKeyExtension) Type() uint16 {
+	return ExtPreSharedKey
+}
+
+func (ext *PreSharedKeyExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+
+	if ext.Server {
+		binary.Write(buf, binary.BigEndian, ext.SelectedIdentity)
+		return buf.Bytes(), nil
+	}
+
+	// ClientHello: identities + binders
+	identBody := &bytes.Buffer{}
+	for _, id := range ext.Identities {
+		binary.Write(identBody, binary.BigEndian, uint16(len(id.Identity)))
+		identBody.Write(id.Identity)
+		binary.Write(identBody, binary.BigEndian, id.ObfuscatedTicketAge)
+	}
+	binary.Write(buf, binary.BigEndian, uint16(identBody.Len()))
+	buf.Write(identBody.Bytes())
+
+	binderBody := &bytes.Buffer{}
+	for _, b := range ext.Binders {
+		binderBody.WriteByte(uint8(len(b)))
+		binderBody.Write(b)
+	}
+	binary.Write(buf, binary.BigEndian, uint16(binderBody.Len()))
+	buf.Write(binderBody.Bytes())
+
+	return buf.Bytes(), nil
+}
+
+func (ext *PreSharedKeyExtension) Decode(b []byte) error {
+	if len(b) < 2 {
+		return fmt.Errorf("pre_shared_key: %w", ErrShortBuffer)
+	}
+
+	// ServerHello: single uint16 selected identity (2 bytes)
+	if len(b) == 2 {
+		ext.Server = true
+		ext.SelectedIdentity = binary.BigEndian.Uint16(b)
+		return nil
+	}
+
+	// ClientHello: identities + binders
+	identLen := int(binary.BigEndian.Uint16(b[:2]))
+	b = b[2:]
+	if len(b) < identLen {
+		return fmt.Errorf("pre_shared_key: %w", ErrShortBuffer)
+	}
+	identData := b[:identLen]
+	b = b[identLen:]
+
+	for len(identData) > 0 {
+		if len(identData) < 6 {
+			return fmt.Errorf("pre_shared_key: %w", ErrShortBuffer)
+		}
+		idLen := int(binary.BigEndian.Uint16(identData[:2]))
+		identData = identData[2:]
+		if len(identData) < idLen+4 {
+			return fmt.Errorf("pre_shared_key: %w", ErrShortBuffer)
+		}
+		ext.Identities = append(ext.Identities, PskIdentity{
+			Identity:            cloneBytes(identData[:idLen]),
+			ObfuscatedTicketAge: binary.BigEndian.Uint32(identData[idLen : idLen+4]),
+		})
+		identData = identData[idLen+4:]
+	}
+
+	if len(b) < 2 {
+		return fmt.Errorf("pre_shared_key: %w", ErrShortBuffer)
+	}
+	binderLen := int(binary.BigEndian.Uint16(b[:2]))
+	b = b[2:]
+	if len(b) < binderLen {
+		return fmt.Errorf("pre_shared_key: %w", ErrShortBuffer)
+	}
+	binderData := b[:binderLen]
+
+	for len(binderData) > 0 {
+		if len(binderData) < 1 {
+			return fmt.Errorf("pre_shared_key: %w", ErrShortBuffer)
+		}
+		n := int(binderData[0])
+		binderData = binderData[1:]
+		if len(binderData) < n {
+			return fmt.Errorf("pre_shared_key: %w", ErrShortBuffer)
+		}
+		ext.Binders = append(ext.Binders, cloneBytes(binderData[:n]))
+		binderData = binderData[n:]
+	}
+
+	return nil
+}
+
+type SignatureAlgorithmsCertExtension struct {
+	Algorithms []uint16
+}
+
+func (ext *SignatureAlgorithmsCertExtension) Type() uint16 {
+	return ExtSignatureAlgorithmsCert
+}
+
+func (ext *SignatureAlgorithmsCertExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.BigEndian, uint16(len(ext.Algorithms)*2))
+	for _, alg := range ext.Algorithms {
+		binary.Write(buf, binary.BigEndian, alg)
+	}
+	return buf.Bytes(), nil
+}
+
+func (ext *SignatureAlgorithmsCertExtension) Decode(b []byte) error {
+	if len(b) < 2 {
+		return fmt.Errorf("signature_algorithms_cert: %w", ErrShortBuffer)
+	}
+	n := int(binary.BigEndian.Uint16(b))
+	if n%2 != 0 {
+		return fmt.Errorf("signature_algorithms_cert: odd algorithm list length %d", n)
+	}
+	if len(b[2:]) < n {
+		return fmt.Errorf("signature_algorithms_cert: %w", ErrShortBuffer)
+	}
+	ext.Algorithms = make([]uint16, 0, n/2)
+	for i := 0; i < n; i += 2 {
+		ext.Algorithms = append(ext.Algorithms, binary.BigEndian.Uint16(b[2+i:]))
+	}
+	return nil
+}
+
+type CookieExtension struct {
+	Data []byte
+}
+
+func (ext *CookieExtension) Type() uint16 {
+	return ExtCookie
+}
+
+func (ext *CookieExtension) Encode() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.BigEndian, uint16(len(ext.Data)))
+	buf.Write(ext.Data)
+	return buf.Bytes(), nil
+}
+
+func (ext *CookieExtension) Decode(b []byte) error {
+	if len(b) < 2 {
+		return fmt.Errorf("cookie: %w", ErrShortBuffer)
+	}
+	n := int(binary.BigEndian.Uint16(b[:2]))
+	if len(b[2:]) < n {
+		return fmt.Errorf("cookie: %w", ErrShortBuffer)
+	}
+	ext.Data = cloneBytes(b[2 : 2+n])
+	return nil
+}
+
+type EarlyDataExtension struct{}
+
+func (ext *EarlyDataExtension) Type() uint16 {
+	return ExtEarlyData
+}
+
+func (ext *EarlyDataExtension) Encode() ([]byte, error) {
+	return nil, nil
+}
+
+func (ext *EarlyDataExtension) Decode(b []byte) error {
+	return nil
+}
+
+// cloneBytes returns a copy of b, or nil if b is nil.
+func cloneBytes(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	c := make([]byte, len(b))
+	copy(c, b)
+	return c
 }
