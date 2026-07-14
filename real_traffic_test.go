@@ -74,3 +74,55 @@ func TestParseClientHello_RealTraffic(t *testing.T) {
 		})
 	}
 }
+
+func TestParseServerHello_RealTraffic(t *testing.T) {
+	tests := []struct {
+		name       string
+		hexData    string
+		wantCipher uint16
+		wantVer    uint16
+	}{
+		{
+			name:       "cloudflare-quic.com-tls13",
+			hexData:    "160303007a020000760303c0f055977763a16aaa37d9515c3b6d78475caa7afe8da5e9eb8f5af08e4eaafd20ebe8ac99a0ad5f34ecff32cd9a081a65751a4a04ec9f88c45b8f9befd09b7221130100002e00330024001d00202df74949f31f61eab7834a62a314b0926b356717849e99d79ce328ec74858e33002b00020304",
+			wantCipher: 0x1301,
+			wantVer:    0x0304,
+		},
+		{
+			name:       "cloudflare-quic.com-tls12",
+			hexData:    "16030300630200005f03036a563e82e6a4f553e63a0c87608b509d6a6153e3f4c4b34f444f574e4752440120caed36287a84815f8abcb014df2528f46b6edfac972389c5efc53e8fd8e27c1fc02b0000170000000000170000ff01000100000b0002010000050000",
+			wantCipher: 0xc02b,
+			wantVer:    0x0303,
+		},
+		{
+			name:       "www.google.com-tls10",
+			hexData:    "160301003b0200003703016a563e86ef33029904b42aebadbd105be49775733327528e444f574e4752440000c00900000f00170000ff01000100000b00020100",
+			wantCipher: 0xc009,
+			wantVer:    0x0301,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := hex.DecodeString(tc.hexData)
+			if err != nil {
+				t.Fatalf("hex decode: %v", err)
+			}
+			info, err := ParseServerHello(bytes.NewReader(data))
+			if err != nil {
+				t.Fatalf("ParseServerHello: %v", err)
+			}
+			if info.CipherSuite != tc.wantCipher {
+				t.Errorf("CipherSuite = 0x%04x, want 0x%04x", info.CipherSuite, tc.wantCipher)
+			}
+			if info.Version != tc.wantVer {
+				t.Errorf("Version = 0x%04x, want 0x%04x", info.Version, tc.wantVer)
+			}
+			if info.CompressionMethod != 0 {
+				t.Errorf("CompressionMethod = 0x%02x, want 0x00", info.CompressionMethod)
+			}
+			t.Logf("Version=0x%04x CipherSuite=0x%04x Compression=0x%02x Proto=%q",
+				info.Version, info.CipherSuite, info.CompressionMethod, info.Proto)
+		})
+	}
+}
