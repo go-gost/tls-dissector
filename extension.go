@@ -138,16 +138,25 @@ func (ext *ServerNameExtension) Encode() ([]byte, error) {
 }
 
 func (ext *ServerNameExtension) Decode(b []byte) error {
-	if len(b) < 5 {
+	if len(b) < 2 {
+		return fmt.Errorf("server_name: %w", ErrShortBuffer)
+	}
+	listLen := int(binary.BigEndian.Uint16(b[:2]))
+	if len(b[2:]) < listLen {
+		return fmt.Errorf("server_name: %w", ErrShortBuffer)
+	}
+	b = b[2 : 2+listLen]
+
+	if len(b) < 3 {
 		return fmt.Errorf("server_name: %w", ErrShortBuffer)
 	}
 
-	ext.NameType = b[2]
-	n := int(binary.BigEndian.Uint16(b[3:]))
-	if len(b[5:]) < n {
+	ext.NameType = b[0]
+	n := int(binary.BigEndian.Uint16(b[1:]))
+	if len(b[3:]) < n {
 		return fmt.Errorf("server_name: %w", ErrShortBuffer)
 	}
-	ext.Name = string(b[5 : 5+n])
+	ext.Name = string(b[3 : 3+n])
 	return nil
 }
 

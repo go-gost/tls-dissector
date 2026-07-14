@@ -386,6 +386,15 @@ func TestClientHelloMsgDecodeMalformed(t *testing.T) {
 			wantErr: "malformed data for cipher suites",
 		},
 		{
+			name: "odd cipher suites length",
+			mutate: func(b []byte) []byte {
+				b[40] = 0x00 // cipher suites len = 3 (odd)
+				b[41] = 0x03
+				return b
+			},
+			wantErr: "odd cipher suite list length",
+		},
+		{
 			name: "compression methods length claims too much",
 			mutate: func(b []byte) []byte {
 				b[44] = 100 // comp methods len
@@ -556,7 +565,7 @@ func TestClientHelloMsgDecodeBadVersion(t *testing.T) {
 	// Actually: record header is stripped. The encoded data from Encode() is just the handshake message body.
 	// Body: 1(type) + 3(len) + 2(version) + 32(random) + ...
 	// Version is at offset 4 in the body
-	encoded[4] = 0x04 // make version 0x04xx which is > TLS 1.3
+	encoded[4] = 0x02 // make version 0x0200, below SSLv3 (0x0300)
 	encoded[5] = 0x00
 
 	decoded := &ClientHelloMsg{}
@@ -577,7 +586,7 @@ func TestServerHelloMsgDecodeBadVersion(t *testing.T) {
 		CompressionMethod: 0x00,
 	}
 	encoded, _ := msg.Encode()
-	encoded[4] = 0x04
+	encoded[4] = 0x02 // make version 0x0200, below SSLv3 (0x0300)
 	encoded[5] = 0x00
 
 	decoded := &ServerHelloMsg{}

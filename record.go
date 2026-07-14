@@ -29,6 +29,13 @@ var (
 
 type Version uint16
 
+const (
+	VersionSSL30 Version = 0x0300
+	VersionTLS10 Version = 0x0301
+	VersionTLS12 Version = 0x0303
+	VersionTLS13 Version = 0x0304
+)
+
 type Record struct {
 	Type    uint8
 	Version Version

@@ -2,7 +2,6 @@ package dissector
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -72,7 +71,7 @@ func (m *ClientHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 		return
 	}
 	m.Version = Version(binary.BigEndian.Uint16(body[:2]))
-	if m.Version < tls.VersionTLS10 || m.Version > tls.VersionTLS13 {
+	if m.Version < VersionSSL30 {
 		err = fmt.Errorf("bad version %x", m.Version)
 		return
 	}
@@ -136,10 +135,13 @@ func (m *ClientHelloMsg) readCipherSuites(b []byte) (n int, err error) {
 
 	nlen := int(binary.BigEndian.Uint16(b[:2]))
 	n += 2
+	if nlen%2 != 0 {
+		return 0, fmt.Errorf("bad length: odd cipher suite list length %d", nlen)
+	}
 	if len(b) < n+nlen {
 		return 0, fmt.Errorf("bad length: malformed data for cipher suites")
 	}
-		m.CipherSuites = make([]uint16, 0, nlen/2)
+	m.CipherSuites = make([]uint16, 0, nlen/2)
 	for i := 0; i < nlen/2; i++ {
 		m.CipherSuites = append(m.CipherSuites, binary.BigEndian.Uint16(b[n:n+2]))
 		n += 2
@@ -291,7 +293,7 @@ func (m *ServerHelloMsg) ReadFrom(r io.Reader) (n int64, err error) {
 		return
 	}
 	m.Version = Version(binary.BigEndian.Uint16(body[:2]))
-	if m.Version < tls.VersionTLS10 || m.Version > tls.VersionTLS13 {
+	if m.Version < VersionSSL30 {
 		err = fmt.Errorf("bad version %x", m.Version)
 		return
 	}
