@@ -545,6 +545,21 @@ func (ext *KeyShareExtension) Decode(b []byte) error {
 		return fmt.Errorf("key_share: %w", ErrShortBuffer)
 	}
 
+	// HelloRetryRequest key_share (RFC 8446 §4.2.8): 2 bytes, just the
+	// selected NamedGroup, no key_exchange field.  A ClientHello with
+	// bodyLen=0 (0x0000) stays a no-op empty key_share as before.
+	if len(b) == 2 {
+		n := int(binary.BigEndian.Uint16(b[:2]))
+		if n == 0 {
+			return nil // ClientHello with empty client_shares
+		}
+		ext.Server = true
+		ext.Entries = append(ext.Entries, KeyShareEntry{
+			Group: uint16(n),
+		})
+		return nil
+	}
+
 	// Heuristic: if data is exactly one KeyShareEntry without outer length
 	// prefix, it's ServerHello format. A ServerHello key_share for x25519
 	// is 36 bytes (2+2+32); a ClientHello with one x25519 entry is 38
